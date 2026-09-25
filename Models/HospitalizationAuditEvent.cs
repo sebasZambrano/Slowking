@@ -4,21 +4,25 @@ public sealed class HospitalizationAuditEvent
 {
     public int AuditId { get; set; }
 
+    public string? Container { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime? StartExecution { get; set; }
 
     public DateTime? EndExecution { get; set; }
 
-    public string? Rule { get; set; }
+    public int? Rule { get; set; }
 
     public string? RuleDescription { get; set; }
 
     public string? Action { get; set; }
 
+    public string? IdentificationNumber { get; set; }
+
     public string? AdmissionNumber { get; set; }
 
-    public string? Bed { get; set; }
+    public int? Bed { get; set; }
 
     public string? PreviousBed { get; set; }
 

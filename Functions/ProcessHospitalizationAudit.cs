@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Json;
 using HospitalizationReconciliationNewRelic.Models;
 using HospitalizationReconciliationNewRelic.Services;
@@ -14,6 +13,7 @@ public sealed class ProcessHospitalizationAudit
     private readonly HospitalizationAuditService _auditService;
     private readonly HttpClient _httpClient;
     private readonly string _apimUrl;
+    private readonly string _apimSubscriptionKey;
 
     public ProcessHospitalizationAudit(
         ILogger<ProcessHospitalizationAudit> logger,
@@ -29,6 +29,11 @@ public sealed class ProcessHospitalizationAudit
             configuration["APIM_HOSPITALIZATION_AUDIT_URL"]
             ?? throw new InvalidOperationException(
                 "APIM_HOSPITALIZATION_AUDIT_URL is not configured.");
+
+        _apimSubscriptionKey =
+            configuration["APIM_SUBSCRIPTION_KEY"]
+            ?? throw new InvalidOperationException(
+                "APIM_SUBSCRIPTION_KEY is not configured.");
 
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
@@ -46,14 +51,19 @@ public sealed class ProcessHospitalizationAudit
 
         try
         {
-            events = await _auditService.ClaimPendingAsync(
-                cancellationToken);
+            events = await _auditService.ClaimPendingAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "ClaimPendingAsync returned {Count} records.",
+                events.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(
                 ex,
-                "Error claiming hospitalization audit records.");
+                "Error claiming hospitalization audit records. Type={ExceptionType}, Message={Message}",
+                ex.GetType().FullName,
+                ex.Message);
 
             throw;
         }
@@ -73,9 +83,7 @@ public sealed class ProcessHospitalizationAudit
         foreach (var auditEvent in events)
         {
             if (cancellationToken.IsCancellationRequested)
-            {
                 break;
-            }
 
             await ProcessEventAsync(
                 auditEvent,
@@ -90,6 +98,10 @@ public sealed class ProcessHospitalizationAudit
         HospitalizationAuditEvent auditEvent,
         CancellationToken cancellationToken)
     {
+        _logger.LogInformation(
+            "Starting processing for AuditId {AuditId}.",
+            auditEvent.AuditId);
+
         try
         {
             var payload = new[]
@@ -117,14 +129,34 @@ public sealed class ProcessHospitalizationAudit
                 }
             };
 
-            using var response = await _httpClient.PostAsJsonAsync(
-                _apimUrl,
-                payload,
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                _apimUrl)
+            {
+                Content = JsonContent.Create(payload)
+            };
+
+            request.Headers.Add(
+                "Ocp-Apim-Subscription-Key",
+                _apimSubscriptionKey);
+
+            _logger.LogInformation(
+                "Sending AuditId {AuditId} to APIM.",
+                auditEvent.AuditId);
+
+            using var response = await _httpClient.SendAsync(
+                request,
                 cancellationToken);
 
             var responseBody =
                 await response.Content.ReadAsStringAsync(
                     cancellationToken);
+
+            _logger.LogInformation(
+                "APIM response for AuditId {AuditId}: HTTP {StatusCode}. Body: {ResponseBody}",
+                auditEvent.AuditId,
+                (int)response.StatusCode,
+                responseBody);
 
             if (response.IsSuccessStatusCode)
             {
@@ -134,7 +166,7 @@ public sealed class ProcessHospitalizationAudit
                     cancellationToken);
 
                 _logger.LogInformation(
-                    "Audit {AuditId} sent successfully to New Relic through APIM.",
+                    "AuditId {AuditId} marked as SENT.",
                     auditEvent.AuditId);
 
                 return;
@@ -145,34 +177,40 @@ public sealed class ProcessHospitalizationAudit
                 $"HTTP {(int)response.StatusCode} - {responseBody}",
                 cancellationToken);
 
-            _logger.LogError(
-                "APIM returned HTTP {StatusCode} for audit {AuditId}.",
-                response.StatusCode,
-                auditEvent.AuditId);
+            _logger.LogWarning(
+                "AuditId {AuditId} marked as ERROR because APIM returned HTTP {StatusCode}.",
+                auditEvent.AuditId,
+                (int)response.StatusCode);
         }
         catch (Exception ex)
         {
-            var error = ex.Message;
+            _logger.LogError(
+                ex,
+                "Exception processing AuditId {AuditId}. Type={ExceptionType}, Message={Message}",
+                auditEvent.AuditId,
+                ex.GetType().FullName,
+                ex.Message);
 
             try
             {
                 await _auditService.MarkErrorAsync(
                     auditEvent.AuditId,
-                    error,
+                    ex.ToString(),
                     cancellationToken);
+
+                _logger.LogInformation(
+                    "AuditId {AuditId} marked as ERROR after exception.",
+                    auditEvent.AuditId);
             }
             catch (Exception statusException)
             {
                 _logger.LogError(
                     statusException,
-                    "Could not mark audit {AuditId} as ERROR.",
-                    auditEvent.AuditId);
+                    "Could not mark AuditId {AuditId} as ERROR. Type={ExceptionType}, Message={Message}",
+                    auditEvent.AuditId,
+                    statusException.GetType().FullName,
+                    statusException.Message);
             }
-
-            _logger.LogError(
-                ex,
-                "Error sending audit {AuditId} to APIM.",
-                auditEvent.AuditId);
         }
     }
 }

@@ -43,6 +43,10 @@ public sealed class HospitalizationAuditService
             {
                 AuditId = reader.GetInt32(reader.GetOrdinal("Id")),
 
+                Container = GetNullableString(
+                    reader,
+                    "Container"),
+
                 CreatedAt = reader.GetDateTime(
                     reader.GetOrdinal("CreatedAt")),
 
@@ -54,7 +58,9 @@ public sealed class HospitalizationAuditService
                     reader,
                     "EndExecution"),
 
-                Rule = GetNullableString(reader, "Rule"),
+                Rule = reader.IsDBNull(reader.GetOrdinal("Rule"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("Rule")),
 
                 RuleDescription = GetNullableString(
                     reader,
@@ -62,13 +68,17 @@ public sealed class HospitalizationAuditService
 
                 Action = GetNullableString(reader, "Action"),
 
+                IdentificationNumber = GetNullableString(
+                    reader,
+                    "IPCODPACI"),
+
                 AdmissionNumber = GetNullableString(
                     reader,
                     "NUMINGRES"),
 
-                Bed = GetNullableString(
-                    reader,
-                    "CODICAMAS"),
+                Bed = reader.IsDBNull(reader.GetOrdinal("CODICAMAS"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("CODICAMAS")),
 
                 PreviousBed = GetNullableString(
                     reader,
