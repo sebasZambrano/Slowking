@@ -1,5 +1,5 @@
 CREATE OR ALTER PROCEDURE beds.usp_MarkHospitalizationAuditSent
-    @Id INT,
+    @Id BIGINT,
     @Response VARCHAR(4000) = NULL
 AS
 BEGIN

@@ -41,7 +41,7 @@ public sealed class HospitalizationAuditService
         {
             events.Add(new HospitalizationAuditEvent
             {
-                AuditId = reader.GetInt32(reader.GetOrdinal("Id")),
+                AuditId = reader.GetInt64(reader.GetOrdinal("Id")),
 
                 Container = GetNullableString(
                     reader,
@@ -118,7 +118,7 @@ public sealed class HospitalizationAuditService
     }
 
     public async Task MarkSentAsync(
-        int id,
+        long id,
         string? response,
         CancellationToken cancellationToken)
     {
@@ -130,7 +130,7 @@ public sealed class HospitalizationAuditService
     }
 
     public async Task MarkErrorAsync(
-        int id,
+        long id,
         string? response,
         CancellationToken cancellationToken)
     {
@@ -143,7 +143,7 @@ public sealed class HospitalizationAuditService
 
     private async Task ExecuteStatusProcedureAsync(
         string procedureName,
-        int id,
+        long id,
         string? response,
         CancellationToken cancellationToken)
     {

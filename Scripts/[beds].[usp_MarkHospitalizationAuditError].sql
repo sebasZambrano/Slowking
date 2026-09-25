@@ -1,5 +1,5 @@
 CREATE OR ALTER PROCEDURE beds.usp_MarkHospitalizationAuditError
-    @Id INT,
+    @Id BIGINT,
     @Response VARCHAR(4000) = NULL
 AS
 BEGIN

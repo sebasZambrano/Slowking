@@ -2,7 +2,7 @@ namespace HospitalizationReconciliationNewRelic.Models;
 
 public sealed class HospitalizationAuditEvent
 {
-    public int AuditId { get; set; }
+    public long AuditId { get; set; }
 
     public string? Container { get; set; }
 
