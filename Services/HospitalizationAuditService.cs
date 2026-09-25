@@ -27,7 +27,7 @@ public sealed class HospitalizationAuditService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = new SqlCommand(
-            "beds.usp_ClaimHospitalizationAuditForNewRelic",
+            "Beds.usp_ClaimHospitalizationAuditForNewRelic",
             connection)
         {
             CommandType = CommandType.StoredProcedure,
@@ -113,7 +113,7 @@ public sealed class HospitalizationAuditService
         CancellationToken cancellationToken)
     {
         await ExecuteStatusProcedureAsync(
-            "beds.usp_MarkHospitalizationAuditSent",
+            "Beds.usp_MarkHospitalizationAuditSent",
             id,
             response,
             cancellationToken);
@@ -125,7 +125,7 @@ public sealed class HospitalizationAuditService
         CancellationToken cancellationToken)
     {
         await ExecuteStatusProcedureAsync(
-            "beds.usp_MarkHospitalizationAuditError",
+            "Beds.usp_MarkHospitalizationAuditError",
             id,
             response,
             cancellationToken);
