@@ -24,15 +24,15 @@ public sealed class HospitalizationAuditEvent
 
     public int? Bed { get; set; }
 
-    public string? PreviousBed { get; set; }
+    public int? PreviousBed { get; set; }
 
-    public string? NewBed { get; set; }
+    public int? NewBed { get; set; }
 
-    public string? OriginBed { get; set; }
+    public int? OriginBed { get; set; }
 
-    public string? DestinationBed { get; set; }
+    public int? DestinationBed { get; set; }
 
-    public string? TransferConsecutive { get; set; }
+    public int? TransferConsecutive { get; set; }
 
     public string? PreviousValue { get; set; }
 

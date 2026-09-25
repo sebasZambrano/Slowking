@@ -53,6 +53,7 @@ BEGIN
         NewRelicAttempts = NewRelicAttempts + 1
     OUTPUT
         inserted.Id,
+        inserted.Container,
         inserted.CreatedAt,
         inserted.StartExecution,
         inserted.EndExecution,

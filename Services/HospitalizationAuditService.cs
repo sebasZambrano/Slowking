@@ -80,25 +80,25 @@ public sealed class HospitalizationAuditService
                     ? null
                     : reader.GetInt32(reader.GetOrdinal("CODICAMAS")),
 
-                PreviousBed = GetNullableString(
-                    reader,
-                    "CODICAMAS_PREVIOUSLY"),
+                PreviousBed = reader.IsDBNull(reader.GetOrdinal("CODICAMAS_PREVIOUSLY"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("CODICAMAS_PREVIOUSLY")),
 
-                NewBed = GetNullableString(
-                    reader,
-                    "CODICAMAS_AFTER"),
+                NewBed = reader.IsDBNull(reader.GetOrdinal("CODICAMAS_AFTER"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("CODICAMAS_AFTER")),
 
-                OriginBed = GetNullableString(
-                    reader,
-                    "CODICAORI"),
+                OriginBed = reader.IsDBNull(reader.GetOrdinal("CODICAORI"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("CODICAORI")),
 
-                DestinationBed = GetNullableString(
-                    reader,
-                    "CODICADES"),
+                DestinationBed = reader.IsDBNull(reader.GetOrdinal("CODICADES"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("CODICADES")),
 
-                TransferConsecutive = GetNullableString(
-                    reader,
-                    "CODCONCEC"),
+                TransferConsecutive = reader.IsDBNull(reader.GetOrdinal("CODCONCEC"))
+                    ? null
+                    : reader.GetInt32(reader.GetOrdinal("CODCONCEC")),
 
                 PreviousValue = GetNullableString(
                     reader,
