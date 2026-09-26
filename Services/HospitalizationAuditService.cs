@@ -1,210 +1,499 @@
-using HospitalizationReconciliationNewRelic.Models;
-using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 using System.Data;
+using System.Data.Common;
+using Slowking.Data;
+using Slowking.Models;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Configuration;
 
-namespace HospitalizationReconciliationNewRelic.Services;
+namespace Slowking.Services;
 
 public sealed class HospitalizationAuditService
 {
+    private const int BatchSize = 100;
+    private const int ProcessingTimeoutMinutes = 15;
+    private const int MaxAttempts = 5;
+
     private readonly string _server;
-    private readonly string _userId;
-    private readonly string _password;
 
     public HospitalizationAuditService(IConfiguration configuration)
     {
-        _server = configuration["SQL_SERVER"] ?? throw new InvalidOperationException("SQL_SERVER is not configured.");
-        _userId = configuration["USER_ID"] ?? throw new InvalidOperationException("USER_ID is not configured.");
-        _password = configuration["PASSWORD"] ?? throw new InvalidOperationException("PASSWORD is not configured.");
+        _server =
+            configuration["SQL_SERVER"]
+            ?? throw new InvalidOperationException(
+                "SQL_SERVER is not configured.");
     }
 
-    public async Task<List<HospitalizationAuditEvent>> ClaimPendingAsync( string database, CancellationToken cancellationToken)
+    public async Task<List<HospitalizationAuditEvent>> ClaimPendingAsync(
+        string database,
+        CancellationToken cancellationToken)
     {
-        var events = new List<HospitalizationAuditEvent>();
+        var options = BuildDbContextOptions(database);
 
-        await using var connection = new SqlConnection(
-            BuildConnectionString(database));
+        // Create a temporary context only to obtain the configured execution strategy.
+        await using var strategyContext =
+            new HospitalizationDbContext(options);
 
-        await connection.OpenAsync(cancellationToken);
+        var strategy =
+            strategyContext.Database.CreateExecutionStrategy();
 
-        await using var command = new SqlCommand(
-            "Beds.usp_ClaimHospitalizationAuditForNewRelic",
-            connection)
-        {
-            CommandType = CommandType.StoredProcedure,
-            CommandTimeout = 60
-        };
-
-        await using var reader =
-            await command.ExecuteReaderAsync(cancellationToken);
-
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            events.Add(new HospitalizationAuditEvent
+        return await strategy.ExecuteAsync(
+            async () =>
             {
-                AuditId = reader.GetInt64(
-                    reader.GetOrdinal("Id")),
+                await using var db =
+                    new HospitalizationDbContext(options);
 
-                Container = GetNullableString(
-                    reader,
-                    "Container"),
+                await using var transaction =
+                    await db.Database.BeginTransactionAsync(
+                        IsolationLevel.ReadCommitted,
+                        cancellationToken);
 
-                CreatedAt = reader.GetDateTime(
-                    reader.GetOrdinal("CreatedAt")),
+                var now = DateTime.UtcNow;
 
-                StartExecution = GetNullableDateTime(
-                    reader,
-                    "StartExecution"),
+                await RecoverStaleProcessingAsync(
+                    db,
+                    now,
+                    cancellationToken);
 
-                EndExecution = GetNullableDateTime(
-                    reader,
-                    "EndExecution"),
+                var sql = """
+                    ;WITH Pending AS
+                    (
+                        SELECT TOP (@BatchSize)
+                            Id
+                        FROM Beds.HospitalizationReconciliationAudit WITH
+                        (
+                            UPDLOCK,
+                            READPAST,
+                            ROWLOCK
+                        )
+                        WHERE
+                            (
+                                NewRelicStatus IS NULL
+                                OR NewRelicStatus = 'PENDING'
+                                OR
+                                (
+                                    NewRelicStatus = 'ERROR'
+                                    AND ISNULL(NewRelicAttempts, 0) < @MaxAttempts
+                                )
+                            )
+                        ORDER BY Id
+                    )
+                    UPDATE A
+                    SET
+                        NewRelicStatus = 'PROCESSING',
+                        NewRelicProcessingAt = @Now,
+                        NewRelicResponse = NULL,
+                        NewRelicAttempts = ISNULL(NewRelicAttempts, 0) + 1
+                    OUTPUT
+                        inserted.Id,
+                        inserted.Container,
+                        inserted.CreatedAt,
+                        inserted.StartExecution,
+                        inserted.EndExecution,
+                        inserted.Rule,
+                        inserted.RuleDescription,
+                        inserted.Action,
+                        inserted.IPCODPACI,
+                        inserted.NUMINGRES,
+                        inserted.CODICAMAS,
+                        inserted.CODICAMAS_PREVIOUSLY,
+                        inserted.CODICAMAS_AFTER,
+                        inserted.CODICAORI,
+                        inserted.CODICADES,
+                        inserted.CODCONCEC,
+                        inserted.PreviousValue,
+                        inserted.NewValue,
+                        inserted.Detail
+                    FROM Beds.HospitalizationReconciliationAudit A
+                    INNER JOIN Pending P
+                        ON P.Id = A.Id;
+                    """;
 
-                Rule = GetNullableInt32(
-                    reader,
-                    "Rule"),
+                var events =
+                    new List<HospitalizationAuditEvent>();
 
-                RuleDescription = GetNullableString(
-                    reader,
-                    "RuleDescription"),
+                var connection =
+                    db.Database.GetDbConnection();
 
-                Action = GetNullableString(
-                    reader,
-                    "Action"),
+                await using var command =
+                    connection.CreateCommand();
 
-                IdentificationNumber = GetNullableString(
-                    reader,
-                    "IPCODPACI"),
+                var currentTransaction =
+                    db.Database.CurrentTransaction;
 
-                AdmissionNumber = GetNullableString(
-                    reader,
-                    "NUMINGRES"),
+                if (currentTransaction is not null)
+                {
+                    command.Transaction =
+                        currentTransaction.GetDbTransaction();
+                }
 
-                Bed = GetNullableInt32(
-                    reader,
-                    "CODICAMAS"),
+                command.CommandText = sql;
 
-                PreviousBed = GetNullableInt32(
-                    reader,
-                    "CODICAMAS_PREVIOUSLY"),
+                var batchSizeParameter =
+                    command.CreateParameter();
 
-                NewBed = GetNullableInt32(
-                    reader,
-                    "CODICAMAS_AFTER"),
+                batchSizeParameter.ParameterName =
+                    "@BatchSize";
 
-                OriginBed = GetNullableInt32(
-                    reader,
-                    "CODICAORI"),
+                batchSizeParameter.DbType =
+                    DbType.Int32;
 
-                DestinationBed = GetNullableInt32(
-                    reader,
-                    "CODICADES"),
+                batchSizeParameter.Value =
+                    BatchSize;
 
-                TransferConsecutive = GetNullableInt32(
-                    reader,
-                    "CODCONCEC"),
+                command.Parameters.Add(
+                    batchSizeParameter);
 
-                PreviousValue = GetNullableString(
-                    reader,
-                    "PreviousValue"),
+                var maxAttemptsParameter =
+                    command.CreateParameter();
 
-                NewValue = GetNullableString(
-                    reader,
-                    "NewValue"),
+                maxAttemptsParameter.ParameterName =
+                    "@MaxAttempts";
 
-                Detail = GetNullableString(
-                    reader,
-                    "Detail")
+                maxAttemptsParameter.DbType =
+                    DbType.Int32;
+
+                maxAttemptsParameter.Value =
+                    MaxAttempts;
+
+                command.Parameters.Add(
+                    maxAttemptsParameter);
+
+                var nowParameter =
+                    command.CreateParameter();
+
+                nowParameter.ParameterName =
+                    "@Now";
+
+                nowParameter.DbType =
+                    DbType.DateTime2;
+
+                nowParameter.Value =
+                    now;
+
+                command.Parameters.Add(
+                    nowParameter);
+
+                if (connection.State != ConnectionState.Open)
+                {
+                    await connection.OpenAsync(
+                        cancellationToken);
+                }
+
+                await using var reader =
+                    await command.ExecuteReaderAsync(
+                        cancellationToken);
+
+                while (await reader.ReadAsync(
+                           cancellationToken))
+                {
+                    events.Add(
+                        new HospitalizationAuditEvent
+                        {
+                            AuditId =
+                                reader.GetInt64(
+                                    reader.GetOrdinal("Id")),
+
+                            Container =
+                                GetNullableString(
+                                    reader,
+                                    "Container"),
+
+                            CreatedAt =
+                                reader.GetDateTime(
+                                    reader.GetOrdinal("CreatedAt")),
+
+                            StartExecution =
+                                GetNullableDateTime(
+                                    reader,
+                                    "StartExecution"),
+
+                            EndExecution =
+                                GetNullableDateTime(
+                                    reader,
+                                    "EndExecution"),
+
+                            Rule =
+                                GetNullableInt32(
+                                    reader,
+                                    "Rule"),
+
+                            RuleDescription =
+                                GetNullableString(
+                                    reader,
+                                    "RuleDescription"),
+
+                            Action =
+                                GetNullableString(
+                                    reader,
+                                    "Action"),
+
+                            IdentificationNumber =
+                                GetNullableString(
+                                    reader,
+                                    "IPCODPACI"),
+
+                            AdmissionNumber =
+                                GetNullableString(
+                                    reader,
+                                    "NUMINGRES"),
+
+                            Bed =
+                                GetNullableInt32(
+                                    reader,
+                                    "CODICAMAS"),
+
+                            PreviousBed =
+                                GetNullableInt32(
+                                    reader,
+                                    "CODICAMAS_PREVIOUSLY"),
+
+                            NewBed =
+                                GetNullableInt32(
+                                    reader,
+                                    "CODICAMAS_AFTER"),
+
+                            OriginBed =
+                                GetNullableInt32(
+                                    reader,
+                                    "CODICAORI"),
+
+                            DestinationBed =
+                                GetNullableInt32(
+                                    reader,
+                                    "CODICADES"),
+
+                            TransferConsecutive =
+                                GetNullableInt32(
+                                    reader,
+                                    "CODCONCEC"),
+
+                            PreviousValue =
+                                GetNullableString(
+                                    reader,
+                                    "PreviousValue"),
+
+                            NewValue =
+                                GetNullableString(
+                                    reader,
+                                    "NewValue"),
+
+                            Detail =
+                                GetNullableString(
+                                    reader,
+                                    "Detail")
+                        });
+                }
+
+                await transaction.CommitAsync(
+                    cancellationToken);
+
+                return events;
             });
+    }
+
+    public async Task MarkSentAsync(
+        string database,
+        long id,
+        string? response,
+        CancellationToken cancellationToken)
+    {
+        var options =
+            BuildDbContextOptions(database);
+
+        await using var db =
+            new HospitalizationDbContext(options);
+
+        var affected =
+            await db.HospitalizationReconciliationAudit
+                .Where(x =>
+                    x.Id == id &&
+                    x.NewRelicStatus == "PROCESSING")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(
+                            x => x.NewRelicStatus,
+                            "SENT")
+                        .SetProperty(
+                            x => x.NewRelicSentAt,
+                            DateTime.UtcNow)
+                        .SetProperty(
+                            x => x.NewRelicProcessingAt,
+                            (DateTime?)null)
+                        .SetProperty(
+                            x => x.NewRelicResponse,
+                            TruncateResponse(response)),
+                    cancellationToken);
+
+        if (affected == 0)
+        {
+            throw new InvalidOperationException(
+                $"Audit record {id} could not be marked as SENT because it is no longer in PROCESSING state.");
         }
-
-        return events;
     }
 
-    public async Task MarkSentAsync( string database, long id, string? response, CancellationToken cancellationToken)
+    public async Task MarkErrorAsync(
+        string database,
+        long id,
+        string? response,
+        CancellationToken cancellationToken)
     {
-        await ExecuteStatusProcedureAsync(
-            database,
-            "Beds.usp_MarkHospitalizationAuditSent",
-            id,
-            response,
-            cancellationToken);
-    }
+        var options =
+            BuildDbContextOptions(database);
 
-    public async Task MarkErrorAsync( string database, long id, string? response, CancellationToken cancellationToken)
-    {
-        await ExecuteStatusProcedureAsync(
-            database,
-            "Beds.usp_MarkHospitalizationAuditError",
-            id,
-            response,
-            cancellationToken);
-    }
+        await using var db =
+            new HospitalizationDbContext(options);
 
-    private async Task ExecuteStatusProcedureAsync( string database, string procedureName, long id, string? response, CancellationToken cancellationToken)
-    {
-        await using var connection = new SqlConnection(
-            BuildConnectionString(database));
+        var affected =
+            await db.HospitalizationReconciliationAudit
+                .Where(x =>
+                    x.Id == id &&
+                    x.NewRelicStatus == "PROCESSING")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(
+                            x => x.NewRelicStatus,
+                            "ERROR")
+                        .SetProperty(
+                            x => x.NewRelicProcessingAt,
+                            (DateTime?)null)
+                        .SetProperty(
+                            x => x.NewRelicResponse,
+                            TruncateResponse(response)),
+                    cancellationToken);
 
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = new SqlCommand(
-            procedureName,
-            connection)
+        if (affected == 0)
         {
-            CommandType = CommandType.StoredProcedure,
-            CommandTimeout = 30
-        };
-
-        command.Parameters.Add(
-            new SqlParameter("@Id", SqlDbType.BigInt)
-            {
-                Value = id
-            });
-
-        command.Parameters.Add(
-            new SqlParameter("@Response", SqlDbType.VarChar, 4000)
-            {
-                Value = (object?)response ?? DBNull.Value
-            });
-
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            throw new InvalidOperationException(
+                $"Audit record {id} could not be marked as ERROR because it is no longer in PROCESSING state.");
+        }
     }
 
-    private string BuildConnectionString(string database)
+    private async Task RecoverStaleProcessingAsync(
+        HospitalizationDbContext db,
+        DateTime now,
+        CancellationToken cancellationToken)
     {
-        return
-            $"Server={_server};" +
-            $"Initial Catalog={database};" +
-            $"User Id={_userId};" +
-            $"Password={_password};" +
-            "Connection Timeout=30;";
+        var timeout =
+            now.AddMinutes(
+                -ProcessingTimeoutMinutes);
+
+        await db.HospitalizationReconciliationAudit
+            .Where(x =>
+                x.NewRelicStatus == "PROCESSING" &&
+                x.NewRelicProcessingAt != null &&
+                x.NewRelicProcessingAt < timeout)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(
+                        x => x.NewRelicStatus,
+                        "ERROR")
+                    .SetProperty(
+                        x => x.NewRelicProcessingAt,
+                        (DateTime?)null)
+                    .SetProperty(
+                        x => x.NewRelicResponse,
+                        "Recovered from PROCESSING timeout"),
+                cancellationToken);
     }
 
-    private static string? GetNullableString( SqlDataReader reader, string column)
+    private DbContextOptions<HospitalizationDbContext>
+        BuildDbContextOptions(
+            string database)
     {
-        var ordinal = reader.GetOrdinal(column);
+        var connectionString =
+            BuildConnectionString(database);
+
+        return new DbContextOptionsBuilder<
+            HospitalizationDbContext>()
+            .UseSqlServer(
+                connectionString,
+                sqlServerOptions =>
+                {
+                    sqlServerOptions.CommandTimeout(60);
+
+                    sqlServerOptions.EnableRetryOnFailure(
+                        maxRetryCount: 3,
+                        maxRetryDelay:
+                            TimeSpan.FromSeconds(5),
+                        errorNumbersToAdd: null);
+                })
+            .Options;
+    }
+
+    private string BuildConnectionString(
+        string database)
+    {
+        var builder =
+            new SqlConnectionStringBuilder
+            {
+                DataSource =
+                    $"{_server},1433",
+
+                InitialCatalog =
+                    database,
+
+                Authentication =
+                    SqlAuthenticationMethod
+                        .ActiveDirectoryManagedIdentity,
+
+                Encrypt = true,
+
+                TrustServerCertificate = false,
+
+                ConnectTimeout = 30
+            };
+
+        return builder.ConnectionString;
+    }
+
+    private static string? GetNullableString(
+        DbDataReader reader,
+        string column)
+    {
+        var ordinal =
+            reader.GetOrdinal(column);
 
         return reader.IsDBNull(ordinal)
             ? null
             : reader.GetString(ordinal);
     }
 
-    private static int? GetNullableInt32( SqlDataReader reader, string column)
+    private static int? GetNullableInt32(
+        DbDataReader reader,
+        string column)
     {
-        var ordinal = reader.GetOrdinal(column);
+        var ordinal =
+            reader.GetOrdinal(column);
 
         return reader.IsDBNull(ordinal)
             ? null
             : reader.GetInt32(ordinal);
     }
 
-    private static DateTime? GetNullableDateTime( SqlDataReader reader, string column)
+    private static DateTime? GetNullableDateTime(
+        DbDataReader reader,
+        string column)
     {
-        var ordinal = reader.GetOrdinal(column);
+        var ordinal =
+            reader.GetOrdinal(column);
 
         return reader.IsDBNull(ordinal)
             ? null
             : reader.GetDateTime(ordinal);
+    }
+
+    private static string? TruncateResponse(
+        string? response)
+    {
+        if (string.IsNullOrEmpty(response))
+        {
+            return response;
+        }
+
+        return response.Length <= 4000
+            ? response
+            : response[..4000];
     }
 }

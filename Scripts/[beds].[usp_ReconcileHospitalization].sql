@@ -218,6 +218,22 @@ REGLAS IMPLEMENTADAS:
               nueva asignación y no conserva indicadores o
               configuraciones asociadas a una asignación anterior.
 
+   REGLA 13 - CONCILIACIÓN CRONOLÓGICA DE MÚLTIPLES ESTANCIAS ACTIVAS SIN EGRESO REGISTRADO
+
+              Identifica ingresos que presenta más de 2
+              estancias activas y NO existe egreso.
+           
+
+              1. Las estancias se ordenan cronológicamente por FECINIEST.
+              2. Se cierran todas las estancias excepto la última.
+              3. Cada estancia se cierra utilizando el FECINIEST de la
+                siguiente estancia.
+              4. La última estancia permanece abierta.
+              5. Las estancias cerradas pasan de REGESTADO = 1 a 2.
+              6. Las camas asociadas a las estancias cerradas se liberan.
+              7. No se libera una cama si continúa siendo utilizada por
+                otra estancia activa.
+
 TRANSACCIONALIDAD:
 ----------------------------------------------------------------------------
 Las operaciones de reconciliación se ejecutan dentro de una transacción,
@@ -2032,7 +2048,6 @@ BEGIN
               WHERE C.CODICAMAS = A.CODICAMAS
                 AND C.FECINIEST >= @DateAt
                 AND C.FECFINEST >= '1900-01-01 00:00:00.000' AND C.FECFINEST <= '1900-01-01 23:59:59.000'
-                AND C.REGESTADO = 1
           );
 
         UPDATE C
@@ -2077,6 +2092,229 @@ BEGIN
             'ESTADCAMA = 1 / CAMTRAMED = 0 / CAMDEVMED = 0 / BedType = NULL / TypeTransfer = NULL',
             'La cama se encontraba en estado Asignada (ESTADCAMA=2) sin una estancia activa asociada en CHREGESTA. Se actualiza a Libre (ESTADCAMA=1) y se limpian CAMTRAMED, CAMDEVMED, BedType y TypeTransfer.'
         FROM @TrabajoCamasSinEstancia AS T;
+
+        /* ============================================================
+           REGLA 13 - CONCILIACIÓN CRONOLÓGICA DE MÚLTIPLES ESTANCIAS
+           ACTIVAS SIN EGRESO REGISTRADO
+           ============================================================
+
+           OBJETIVO
+           ----------------------------------------------------------------
+           Cuando un ingreso presenta más de 2 estancias activas
+           (FECFINEST = 1900-01-01) y NO existe egreso
+           registrado en CHREGEGRE:
+
+           1. Las estancias se ordenan cronológicamente por FECINIEST.
+           2. Se cierran todas las estancias excepto la última.
+           3. Cada estancia se cierra utilizando el FECINIEST de la
+              siguiente estancia.
+           4. La última estancia permanece abierta.
+           5. Las estancias cerradas pasan de REGESTADO = 1 a 2.
+           6. Las camas asociadas a las estancias cerradas se liberan.
+           7. No se libera una cama si continúa siendo utilizada por
+              otra estancia activa.
+
+           EJEMPLO:
+
+               Estancia 1: 03:47 -> 16:15
+               Estancia 2: 16:15 -> 17:11
+               Estancia 3: 17:11 -> 12:47
+               Estancia 4: 12:47 -> 12:42
+               ...
+               Última:     12:42 -> 1900-01-01 (abierta)
+
+           IMPORTANTE
+           ----------------------------------------------------------------
+           Esta regla NO consulta CHREGEGRE.
+
+           La última estancia permanece activa y abierta.
+        ============================================================ */
+
+
+        /* ============================================================
+           LIMPIAR TABLA DE TRABAJO
+        ============================================================ */
+
+        DELETE FROM @TrabajoEgresos;
+
+
+        /* ============================================================
+           CARGAR ESTANCIAS ACTIVAS
+
+           Se obtiene:
+           - Cantidad de estancias activas por NUMINGRES.
+           - Siguiente FECINIEST mediante LEAD().
+           - Orden cronológico de cada estancia.
+
+           Solo se consideran ingresos con más de 2 estancias activas.
+        ============================================================ */
+
+        ;WITH EstanciasActivas AS
+        (
+            SELECT
+                E.ID,
+                E.IPCODPACI,
+                E.NUMINGRES,
+                E.CODICAMAS,
+                E.FECFINEST AS FechaAnterior,
+                E.FECINIEST,
+                E.REGESTADO,
+                C.ESTADCAMA AS EstadoCamaAnterior,
+
+                LEAD(E.FECINIEST) OVER
+                (
+                    PARTITION BY E.NUMINGRES
+                    ORDER BY
+                        E.FECINIEST,
+                        E.ID
+                ) AS SiguienteFechaInicio,
+
+                COUNT(*) OVER
+                (
+                    PARTITION BY E.NUMINGRES
+                ) AS CantidadEstanciasActivas,
+
+                ROW_NUMBER() OVER
+                (
+                    PARTITION BY E.NUMINGRES
+                    ORDER BY
+                        E.FECINIEST,
+                        E.ID
+                ) AS OrdenEstancia
+
+            FROM dbo.CHREGESTA E
+
+            INNER JOIN dbo.CHCAMASHO C
+                ON C.CODICAMAS = E.CODICAMAS
+
+            WHERE
+                E.FECINIEST >= @DateAt
+                AND E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
+        )
+        INSERT INTO @TrabajoEgresos
+        (
+            ID,
+            IPCODPACI,
+            NUMINGRES,
+            CODICAMAS,
+            FechaAnterior,
+            FechaNueva,
+            FechaEgreso,
+            EstadoCamaAnterior,
+            OrdenEstancia
+        )
+        SELECT
+            ID,
+            IPCODPACI,
+            NUMINGRES,
+            CODICAMAS,
+            FechaAnterior,
+
+            SiguienteFechaInicio AS FechaNueva,
+
+            NULL AS FechaEgreso,
+
+            EstadoCamaAnterior,
+
+            OrdenEstancia
+
+        FROM EstanciasActivas
+        WHERE
+            CantidadEstanciasActivas > 2
+
+            -- The last active stay remains open.
+            AND SiguienteFechaInicio IS NOT NULL;
+
+
+        /* ============================================================
+           ACTUALIZAR ESTANCIAS
+
+           Solo se actualizan las estancias que tienen una siguiente
+           estancia.
+
+           Por lo tanto:
+               Estancia 1 -> se cierra
+               Estancia 2 -> se cierra
+               ...
+               Última     -> permanece abierta
+        ============================================================ */
+
+        UPDATE E
+        SET
+            E.FECFINEST = T.FechaNueva,
+            E.REGESTADO = 2
+        FROM dbo.CHREGESTA E
+        INNER JOIN @TrabajoEgresos T
+            ON T.ID = E.ID;
+
+
+        /* ============================================================
+           LIBERAR CAMAS
+
+           Se liberan únicamente las camas correspondientes a las
+           estancias que fueron cerradas.
+
+           IMPORTANTE:
+           Si una cama continúa asociada a otra estancia activa,
+           NO debe liberarse.
+        ============================================================ */
+
+        UPDATE C
+        SET
+            C.ESTADCAMA = 1
+        FROM dbo.CHCAMASHO C
+        INNER JOIN
+        (
+            SELECT DISTINCT
+                T.CODICAMAS
+            FROM @TrabajoEgresos T
+            WHERE
+                T.CODICAMAS IS NOT NULL
+        ) T
+            ON T.CODICAMAS = C.CODICAMAS
+        WHERE
+            C.ESTADCAMA = 2
+            AND NOT EXISTS
+            (
+                SELECT 1
+                FROM dbo.CHREGESTA E
+                WHERE
+                    E.CODICAMAS = C.CODICAMAS
+                    AND E.REGESTADO = 1
+                    AND E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
+            );
+
+
+        /* ============================================================
+           AUDITORÍA
+        ============================================================ */
+
+        INSERT INTO @Auditoria
+        (
+            Fecha,
+            Regla,
+            ReglaDescripcion,
+            Accion,
+            IPCODPACI,
+            NUMINGRES,
+            CODICAMAS,
+            ValorAnterior,
+            ValorNuevo,
+            Detalle
+        )
+        SELECT
+            @FechaAuditoria,
+            13,
+            'Conciliación cronológica de múltiples estancias activas sin egreso registrado',
+            'UPDATE_ESTANCIA_CAMA',
+            T.IPCODPACI,
+            T.NUMINGRES,
+            T.CODICAMAS,
+            CONVERT(VARCHAR(23), T.FechaAnterior, 121) + ' / REGESTADO = 1 / ESTADCAMA = ' + ISNULL(T.EstadoCamaAnterior, 'NULL'),
+            CONVERT(VARCHAR(23), T.FechaNueva, 121) + ' / REGESTADO = 2 / ESTADCAMA = 1',
+            'La estancia activa fue cerrada utilizando como fecha final la fecha de inicio de la siguiente estancia. Orden de estancia:' + CONVERT(VARCHAR(10), T.OrdenEstancia) + '. Se detectaron múltiples estancias activas sin egreso registrado. '
+
+        FROM @TrabajoEgresos T;
 
         /* ========================================================
            FECHA FINAL

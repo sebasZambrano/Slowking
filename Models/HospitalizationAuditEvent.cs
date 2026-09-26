@@ -1,4 +1,4 @@
-namespace HospitalizationReconciliationNewRelic.Models;
+namespace Slowking.Models;
 
 public sealed class HospitalizationAuditEvent
 {

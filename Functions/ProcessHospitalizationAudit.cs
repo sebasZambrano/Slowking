@@ -1,20 +1,26 @@
+using System.Net;
 using System.Net.Http.Json;
-using HospitalizationReconciliationNewRelic.Models;
-using HospitalizationReconciliationNewRelic.Services;
+using Slowking.Models;
+using Slowking.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace HospitalizationReconciliationNewRelic.Functions;
+namespace Slowking.Functions;
 
 public sealed class ProcessHospitalizationAudit
 {
     private readonly ILogger<ProcessHospitalizationAudit> _logger;
+
     private readonly HospitalizationAuditService _auditService;
+
     private readonly HttpClient _httpClient;
-    private readonly string _apimUrl;
-    private readonly string _apimSubscriptionKey;
+
     private readonly string[] _databases;
+
+    private readonly string _apimUrl;
+
+    private readonly string _apimSubscriptionKey;
 
     public ProcessHospitalizationAudit(
         ILogger<ProcessHospitalizationAudit> logger,
@@ -22,26 +28,30 @@ public sealed class ProcessHospitalizationAudit
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration)
     {
+        _logger = logger;
+
+        _auditService = auditService;
+
+        _httpClient =
+            httpClientFactory.CreateClient();
+
         var databasesConfiguration =
             configuration["SQL_DATABASES"]
             ?? throw new InvalidOperationException(
                 "SQL_DATABASES is not configured.");
 
-        _databases = databasesConfiguration
-            .Split(
-                ',',
-                StringSplitOptions.RemoveEmptyEntries |
-                StringSplitOptions.TrimEntries);
+        _databases =
+            databasesConfiguration
+                .Split(
+                    ',',
+                    StringSplitOptions.RemoveEmptyEntries |
+                    StringSplitOptions.TrimEntries);
 
         if (_databases.Length == 0)
         {
             throw new InvalidOperationException(
                 "SQL_DATABASES does not contain any database.");
         }
-
-        _logger = logger;
-        _auditService = auditService;
-        _httpClient = httpClientFactory.CreateClient();
 
         _apimUrl =
             configuration["APIM_HOSPITALIZATION_AUDIT_URL"]
@@ -52,8 +62,6 @@ public sealed class ProcessHospitalizationAudit
             configuration["APIM_SUBSCRIPTION_KEY"]
             ?? throw new InvalidOperationException(
                 "APIM_SUBSCRIPTION_KEY is not configured.");
-
-        _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
     [Function("ProcessHospitalizationAudit")]
@@ -73,6 +81,9 @@ public sealed class ProcessHospitalizationAudit
         {
             if (cancellationToken.IsCancellationRequested)
             {
+                _logger.LogWarning(
+                    "Cancellation requested. Stopping database processing.");
+
                 break;
             }
 
@@ -82,138 +93,13 @@ public sealed class ProcessHospitalizationAudit
         }
 
         _logger.LogInformation(
-            "Hospitalization reconciliation New Relic process finished.");
-    }
-
-    private async Task ProcessEventAsync(
-        string database,
-        HospitalizationAuditEvent auditEvent,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation(
-            "Starting processing for AuditId {AuditId}.",
-            auditEvent.AuditId);
-
-        try
-        {
-            var payload = new[]
-            {
-                new
-                {
-                    eventType = "HospitalizationReconciliation",
-                    auditId = auditEvent.AuditId,
-                    container = database,
-                    createdAt = auditEvent.CreatedAt,
-                    startExecution = auditEvent.StartExecution,
-                    endExecution = auditEvent.EndExecution,
-                    rule = auditEvent.Rule,
-                    ruleDescription = auditEvent.RuleDescription,
-                    action = auditEvent.Action,
-                    identificationNumber = auditEvent.IdentificationNumber,
-                    admissionNumber = auditEvent.AdmissionNumber,
-                    bed = auditEvent.Bed,
-                    previousBed = auditEvent.PreviousBed,
-                    newBed = auditEvent.NewBed,
-                    originBed = auditEvent.OriginBed,
-                    destinationBed = auditEvent.DestinationBed,
-                    transferConsecutive = auditEvent.TransferConsecutive,
-                    previousValue = auditEvent.PreviousValue,
-                    newValue = auditEvent.NewValue,
-                    detail = auditEvent.Detail
-                }
-            };
-
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post,
-                _apimUrl)
-            {
-                Content = JsonContent.Create(payload)
-            };
-
-            request.Headers.Add(
-                "Ocp-Apim-Subscription-Key",
-                _apimSubscriptionKey);
-
-            _logger.LogInformation(
-                "Sending AuditId {AuditId} to APIM.",
-                auditEvent.AuditId);
-
-            using var response = await _httpClient.SendAsync(
-                request,
-                cancellationToken);
-
-            var responseBody =
-                await response.Content.ReadAsStringAsync(
-                    cancellationToken);
-
-            _logger.LogInformation(
-                "APIM response for AuditId {AuditId}: HTTP {StatusCode}. Body: {ResponseBody}",
-                auditEvent.AuditId,
-                (int)response.StatusCode,
-                responseBody);
-
-            if (response.IsSuccessStatusCode)
-            {
-                await _auditService.MarkSentAsync(
-                    database,
-                    auditEvent.AuditId,
-                    $"HTTP {(int)response.StatusCode} - {responseBody}",
-                    cancellationToken);
-
-                _logger.LogInformation(
-                    "AuditId {AuditId} marked as SENT.",
-                    auditEvent.AuditId);
-
-                return;
-            }
-
-            await _auditService.MarkErrorAsync(
-                database,
-                auditEvent.AuditId,
-                $"HTTP {(int)response.StatusCode} - {responseBody}",
-                cancellationToken);
-
-            _logger.LogWarning(
-                "AuditId {AuditId} marked as ERROR because APIM returned HTTP {StatusCode}.",
-                auditEvent.AuditId,
-                (int)response.StatusCode);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Exception processing AuditId {AuditId}. Type={ExceptionType}, Message={Message}",
-                auditEvent.AuditId,
-                ex.GetType().FullName,
-                ex.Message);
-
-            try
-            {
-                await _auditService.MarkErrorAsync(
-                    database,
-                    auditEvent.AuditId,
-                    ex.ToString(),
-                    cancellationToken);
-
-                _logger.LogInformation(
-                    "AuditId {AuditId} marked as ERROR after exception.",
-                    auditEvent.AuditId);
-            }
-            catch (Exception statusException)
-            {
-                _logger.LogError(
-                    statusException,
-                    "Could not mark AuditId {AuditId} as ERROR. Type={ExceptionType}, Message={Message}",
-                    auditEvent.AuditId,
-                    statusException.GetType().FullName,
-                    statusException.Message);
-            }
-        }
+            "Hospitalization reconciliation New Relic process finished at {Time}.",
+            DateTime.UtcNow);
     }
 
     private async Task ProcessDatabaseAsync(
-    string database,
-    CancellationToken cancellationToken)
+        string database,
+        CancellationToken cancellationToken)
     {
         _logger.LogInformation(
             "[{Database}] Starting hospitalization audit processing.",
@@ -221,12 +107,13 @@ public sealed class ProcessHospitalizationAudit
 
         try
         {
-            var events = await _auditService.ClaimPendingAsync(
-                database,
-                cancellationToken);
+            var events =
+                await _auditService.ClaimPendingAsync(
+                    database,
+                    cancellationToken);
 
             _logger.LogInformation(
-                "[{Database}] ClaimPendingAsync returned {Count} records.",
+                "[{Database}] Claimed {Count} hospitalization audit records.",
                 database,
                 events.Count);
 
@@ -243,6 +130,10 @@ public sealed class ProcessHospitalizationAudit
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
+                    _logger.LogWarning(
+                        "[{Database}] Cancellation requested while processing records.",
+                        database);
+
                     break;
                 }
 
@@ -257,6 +148,13 @@ public sealed class ProcessHospitalizationAudit
                 database,
                 events.Count);
         }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "[{Database}] Processing was cancelled.",
+                database);
+        }
         catch (Exception ex)
         {
             _logger.LogError(
@@ -264,5 +162,173 @@ public sealed class ProcessHospitalizationAudit
                 "[{Database}] Error processing hospitalization audit.",
                 database);
         }
+    }
+
+    private async Task ProcessEventAsync(
+        string database,
+        HospitalizationAuditEvent auditEvent,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var payload = new
+            {
+                eventType = "HospitalizationReconciliation",
+
+                container = database,
+
+                auditId = auditEvent.AuditId,
+
+                createdAt = auditEvent.CreatedAt,
+
+                startExecution = auditEvent.StartExecution,
+
+                endExecution = auditEvent.EndExecution,
+
+                rule = auditEvent.Rule,
+
+                ruleDescription =
+                    auditEvent.RuleDescription,
+
+                action = auditEvent.Action,
+
+                identificationNumber =
+                    auditEvent.IdentificationNumber,
+
+                admissionNumber =
+                    auditEvent.AdmissionNumber,
+
+                bed = auditEvent.Bed,
+
+                previousBed =
+                    auditEvent.PreviousBed,
+
+                newBed =
+                    auditEvent.NewBed,
+
+                originBed =
+                    auditEvent.OriginBed,
+
+                destinationBed =
+                    auditEvent.DestinationBed,
+
+                transferConsecutive =
+                    auditEvent.TransferConsecutive,
+
+                previousValue =
+                    auditEvent.PreviousValue,
+
+                newValue =
+                    auditEvent.NewValue,
+
+                detail =
+                    auditEvent.Detail
+            };
+
+            using var request =
+                new HttpRequestMessage(
+                    HttpMethod.Post,
+                    _apimUrl)
+                {
+                    Content =
+                        JsonContent.Create(payload)
+                };
+
+            request.Headers.Add(
+                "Ocp-Apim-Subscription-Key",
+                _apimSubscriptionKey);
+
+            _logger.LogInformation(
+                "[{Database}] Sending audit {AuditId} to New Relic through APIM.",
+                database,
+                auditEvent.AuditId);
+
+            using var response =
+                await _httpClient.SendAsync(
+                    request,
+                    cancellationToken);
+
+            var responseBody =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            _logger.LogInformation(
+                "[{Database}] APIM response for audit {AuditId}: {StatusCode}.",
+                database,
+                auditEvent.AuditId,
+                (int)response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                await _auditService.MarkSentAsync(
+                    database,
+                    auditEvent.AuditId,
+                    responseBody,
+                    cancellationToken);
+
+                _logger.LogInformation(
+                    "[{Database}] Audit {AuditId} marked as SENT.",
+                    database,
+                    auditEvent.AuditId);
+
+                return;
+            }
+
+            await _auditService.MarkErrorAsync(
+                database,
+                auditEvent.AuditId,
+                BuildErrorResponse(
+                    response.StatusCode,
+                    responseBody),
+                cancellationToken);
+
+            _logger.LogWarning(
+                "[{Database}] Audit {AuditId} marked as ERROR. APIM returned {StatusCode}.",
+                database,
+                auditEvent.AuditId,
+                (int)response.StatusCode);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "[{Database}] Error sending audit {AuditId} to New Relic.",
+                database,
+                auditEvent.AuditId);
+
+            try
+            {
+                await _auditService.MarkErrorAsync(
+                    database,
+                    auditEvent.AuditId,
+                    ex.ToString(),
+                    cancellationToken);
+            }
+            catch (Exception markErrorException)
+            {
+                _logger.LogError(
+                    markErrorException,
+                    "[{Database}] Failed to mark audit {AuditId} as ERROR.",
+                    database,
+                    auditEvent.AuditId);
+            }
+        }
+    }
+
+    private static string BuildErrorResponse(
+        HttpStatusCode statusCode,
+        string responseBody)
+    {
+        var response =
+            $"HTTP {(int)statusCode}: {responseBody}";
+
+        return response.Length <= 4000
+            ? response
+            : response[..4000];
     }
 }
