@@ -14,6 +14,7 @@ public sealed class ProcessHospitalizationAudit
     private readonly HttpClient _httpClient;
     private readonly string _apimUrl;
     private readonly string _apimSubscriptionKey;
+    private readonly string[] _databases;
 
     public ProcessHospitalizationAudit(
         ILogger<ProcessHospitalizationAudit> logger,
@@ -21,6 +22,23 @@ public sealed class ProcessHospitalizationAudit
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration)
     {
+        var databasesConfiguration =
+            configuration["SQL_DATABASES"]
+            ?? throw new InvalidOperationException(
+                "SQL_DATABASES is not configured.");
+
+        _databases = databasesConfiguration
+            .Split(
+                ',',
+                StringSplitOptions.RemoveEmptyEntries |
+                StringSplitOptions.TrimEntries);
+
+        if (_databases.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "SQL_DATABASES does not contain any database.");
+        }
+
         _logger = logger;
         _auditService = auditService;
         _httpClient = httpClientFactory.CreateClient();
@@ -47,46 +65,19 @@ public sealed class ProcessHospitalizationAudit
             "Hospitalization reconciliation New Relic process started at {Time}.",
             DateTime.UtcNow);
 
-        List<HospitalizationAuditEvent> events;
-
-        try
-        {
-            events = await _auditService.ClaimPendingAsync(cancellationToken);
-
-            _logger.LogInformation(
-                "ClaimPendingAsync returned {Count} records.",
-                events.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Error claiming hospitalization audit records. Type={ExceptionType}, Message={Message}",
-                ex.GetType().FullName,
-                ex.Message);
-
-            throw;
-        }
-
-        if (events.Count == 0)
-        {
-            _logger.LogInformation(
-                "No pending hospitalization audit records found.");
-
-            return;
-        }
-
         _logger.LogInformation(
-            "Claimed {Count} hospitalization audit records.",
-            events.Count);
+            "Configured databases: {Count}.",
+            _databases.Length);
 
-        foreach (var auditEvent in events)
+        foreach (var database in _databases)
         {
             if (cancellationToken.IsCancellationRequested)
+            {
                 break;
+            }
 
-            await ProcessEventAsync(
-                auditEvent,
+            await ProcessDatabaseAsync(
+                database,
                 cancellationToken);
         }
 
@@ -95,6 +86,7 @@ public sealed class ProcessHospitalizationAudit
     }
 
     private async Task ProcessEventAsync(
+        string database,
         HospitalizationAuditEvent auditEvent,
         CancellationToken cancellationToken)
     {
@@ -110,7 +102,7 @@ public sealed class ProcessHospitalizationAudit
                 {
                     eventType = "HospitalizationReconciliation",
                     auditId = auditEvent.AuditId,
-                    container = auditEvent.Container,
+                    container = database,
                     createdAt = auditEvent.CreatedAt,
                     startExecution = auditEvent.StartExecution,
                     endExecution = auditEvent.EndExecution,
@@ -163,6 +155,7 @@ public sealed class ProcessHospitalizationAudit
             if (response.IsSuccessStatusCode)
             {
                 await _auditService.MarkSentAsync(
+                    database,
                     auditEvent.AuditId,
                     $"HTTP {(int)response.StatusCode} - {responseBody}",
                     cancellationToken);
@@ -175,6 +168,7 @@ public sealed class ProcessHospitalizationAudit
             }
 
             await _auditService.MarkErrorAsync(
+                database,
                 auditEvent.AuditId,
                 $"HTTP {(int)response.StatusCode} - {responseBody}",
                 cancellationToken);
@@ -196,6 +190,7 @@ public sealed class ProcessHospitalizationAudit
             try
             {
                 await _auditService.MarkErrorAsync(
+                    database,
                     auditEvent.AuditId,
                     ex.ToString(),
                     cancellationToken);
@@ -213,6 +208,61 @@ public sealed class ProcessHospitalizationAudit
                     statusException.GetType().FullName,
                     statusException.Message);
             }
+        }
+    }
+
+    private async Task ProcessDatabaseAsync(
+    string database,
+    CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "[{Database}] Starting hospitalization audit processing.",
+            database);
+
+        try
+        {
+            var events = await _auditService.ClaimPendingAsync(
+                database,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "[{Database}] ClaimPendingAsync returned {Count} records.",
+                database,
+                events.Count);
+
+            if (events.Count == 0)
+            {
+                _logger.LogInformation(
+                    "[{Database}] No pending hospitalization audit records found.",
+                    database);
+
+                return;
+            }
+
+            foreach (var auditEvent in events)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                await ProcessEventAsync(
+                    database,
+                    auditEvent,
+                    cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "[{Database}] Finished processing {Count} records.",
+                database,
+                events.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "[{Database}] Error processing hospitalization audit.",
+                database);
         }
     }
 }

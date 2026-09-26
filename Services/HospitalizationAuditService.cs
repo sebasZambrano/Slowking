@@ -1,28 +1,29 @@
 using HospitalizationReconciliationNewRelic.Models;
 using Microsoft.Data.SqlClient;
-using System.Data;
 using Microsoft.Extensions.Configuration;
+using System.Data;
 
 namespace HospitalizationReconciliationNewRelic.Services;
 
 public sealed class HospitalizationAuditService
 {
-    private readonly string _connectionString;
+    private readonly string _server;
+    private readonly string _userId;
+    private readonly string _password;
 
     public HospitalizationAuditService(IConfiguration configuration)
     {
-        _connectionString =
-            configuration["SQL_CONNECTION_STRING"]
-            ?? throw new InvalidOperationException(
-                "SQL_CONNECTION_STRING is not configured.");
+        _server = configuration["SQL_SERVER"] ?? throw new InvalidOperationException("SQL_SERVER is not configured.");
+        _userId = configuration["USER_ID"] ?? throw new InvalidOperationException("USER_ID is not configured.");
+        _password = configuration["PASSWORD"] ?? throw new InvalidOperationException("PASSWORD is not configured.");
     }
 
-    public async Task<List<HospitalizationAuditEvent>> ClaimPendingAsync(
-        CancellationToken cancellationToken)
+    public async Task<List<HospitalizationAuditEvent>> ClaimPendingAsync( string database, CancellationToken cancellationToken)
     {
         var events = new List<HospitalizationAuditEvent>();
 
-        await using var connection = new SqlConnection(_connectionString);
+        await using var connection = new SqlConnection(
+            BuildConnectionString(database));
 
         await connection.OpenAsync(cancellationToken);
 
@@ -41,7 +42,8 @@ public sealed class HospitalizationAuditService
         {
             events.Add(new HospitalizationAuditEvent
             {
-                AuditId = reader.GetInt64(reader.GetOrdinal("Id")),
+                AuditId = reader.GetInt64(
+                    reader.GetOrdinal("Id")),
 
                 Container = GetNullableString(
                     reader,
@@ -58,15 +60,17 @@ public sealed class HospitalizationAuditService
                     reader,
                     "EndExecution"),
 
-                Rule = reader.IsDBNull(reader.GetOrdinal("Rule"))
-                    ? null
-                    : reader.GetInt32(reader.GetOrdinal("Rule")),
+                Rule = GetNullableInt32(
+                    reader,
+                    "Rule"),
 
                 RuleDescription = GetNullableString(
                     reader,
                     "RuleDescription"),
 
-                Action = GetNullableString(reader, "Action"),
+                Action = GetNullableString(
+                    reader,
+                    "Action"),
 
                 IdentificationNumber = GetNullableString(
                     reader,
@@ -76,29 +80,29 @@ public sealed class HospitalizationAuditService
                     reader,
                     "NUMINGRES"),
 
-                Bed = reader.IsDBNull(reader.GetOrdinal("CODICAMAS"))
-                    ? null
-                    : reader.GetInt32(reader.GetOrdinal("CODICAMAS")),
+                Bed = GetNullableInt32(
+                    reader,
+                    "CODICAMAS"),
 
-                PreviousBed = reader.IsDBNull(reader.GetOrdinal("CODICAMAS_PREVIOUSLY"))
-                    ? null
-                    : reader.GetInt32(reader.GetOrdinal("CODICAMAS_PREVIOUSLY")),
+                PreviousBed = GetNullableInt32(
+                    reader,
+                    "CODICAMAS_PREVIOUSLY"),
 
-                NewBed = reader.IsDBNull(reader.GetOrdinal("CODICAMAS_AFTER"))
-                    ? null
-                    : reader.GetInt32(reader.GetOrdinal("CODICAMAS_AFTER")),
+                NewBed = GetNullableInt32(
+                    reader,
+                    "CODICAMAS_AFTER"),
 
-                OriginBed = reader.IsDBNull(reader.GetOrdinal("CODICAORI"))
-                    ? null
-                    : reader.GetInt32(reader.GetOrdinal("CODICAORI")),
+                OriginBed = GetNullableInt32(
+                    reader,
+                    "CODICAORI"),
 
-                DestinationBed = reader.IsDBNull(reader.GetOrdinal("CODICADES"))
-                    ? null
-                    : reader.GetInt32(reader.GetOrdinal("CODICADES")),
+                DestinationBed = GetNullableInt32(
+                    reader,
+                    "CODICADES"),
 
-                TransferConsecutive = reader.IsDBNull(reader.GetOrdinal("CODCONCEC"))
-                    ? null
-                    : reader.GetInt32(reader.GetOrdinal("CODCONCEC")),
+                TransferConsecutive = GetNullableInt32(
+                    reader,
+                    "CODCONCEC"),
 
                 PreviousValue = GetNullableString(
                     reader,
@@ -117,37 +121,30 @@ public sealed class HospitalizationAuditService
         return events;
     }
 
-    public async Task MarkSentAsync(
-        long id,
-        string? response,
-        CancellationToken cancellationToken)
+    public async Task MarkSentAsync( string database, long id, string? response, CancellationToken cancellationToken)
     {
         await ExecuteStatusProcedureAsync(
+            database,
             "Beds.usp_MarkHospitalizationAuditSent",
             id,
             response,
             cancellationToken);
     }
 
-    public async Task MarkErrorAsync(
-        long id,
-        string? response,
-        CancellationToken cancellationToken)
+    public async Task MarkErrorAsync( string database, long id, string? response, CancellationToken cancellationToken)
     {
         await ExecuteStatusProcedureAsync(
+            database,
             "Beds.usp_MarkHospitalizationAuditError",
             id,
             response,
             cancellationToken);
     }
 
-    private async Task ExecuteStatusProcedureAsync(
-        string procedureName,
-        long id,
-        string? response,
-        CancellationToken cancellationToken)
+    private async Task ExecuteStatusProcedureAsync( string database, string procedureName, long id, string? response, CancellationToken cancellationToken)
     {
-        await using var connection = new SqlConnection(_connectionString);
+        await using var connection = new SqlConnection(
+            BuildConnectionString(database));
 
         await connection.OpenAsync(cancellationToken);
 
@@ -160,7 +157,7 @@ public sealed class HospitalizationAuditService
         };
 
         command.Parameters.Add(
-            new SqlParameter("@Id", SqlDbType.Int)
+            new SqlParameter("@Id", SqlDbType.BigInt)
             {
                 Value = id
             });
@@ -174,9 +171,17 @@ public sealed class HospitalizationAuditService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static string? GetNullableString(
-        SqlDataReader reader,
-        string column)
+    private string BuildConnectionString(string database)
+    {
+        return
+            $"Server={_server};" +
+            $"Initial Catalog={database};" +
+            $"User Id={_userId};" +
+            $"Password={_password};" +
+            "Connection Timeout=30;";
+    }
+
+    private static string? GetNullableString( SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
 
@@ -185,9 +190,16 @@ public sealed class HospitalizationAuditService
             : reader.GetString(ordinal);
     }
 
-    private static DateTime? GetNullableDateTime(
-        SqlDataReader reader,
-        string column)
+    private static int? GetNullableInt32( SqlDataReader reader, string column)
+    {
+        var ordinal = reader.GetOrdinal(column);
+
+        return reader.IsDBNull(ordinal)
+            ? null
+            : reader.GetInt32(ordinal);
+    }
+
+    private static DateTime? GetNullableDateTime( SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
 
