@@ -16,13 +16,14 @@ public sealed class HospitalizationAuditService
     private const int MaxAttempts = 5;
 
     private readonly string _server;
+    private readonly string _userId;
+    private readonly string _password;
 
     public HospitalizationAuditService(IConfiguration configuration)
     {
-        _server =
-            configuration["SQL_SERVER"]
-            ?? throw new InvalidOperationException(
-                "SQL_SERVER is not configured.");
+        _server = configuration["SQL_SERVER"] ?? throw new InvalidOperationException("SQL_SERVER is not configured.");
+        _userId = configuration["USER_ID"] ?? throw new InvalidOperationException("USER_ID is not configured.");
+        _password = configuration["PASSWORD"] ?? throw new InvalidOperationException("PASSWORD is not configured.");
     }
 
     public async Task<List<HospitalizationAuditEvent>> ClaimPendingAsync(
@@ -428,20 +429,10 @@ public sealed class HospitalizationAuditService
         var builder =
             new SqlConnectionStringBuilder
             {
-                DataSource =
-                    $"{_server},1433",
-
-                InitialCatalog =
-                    database,
-
-                Authentication =
-                    SqlAuthenticationMethod
-                        .ActiveDirectoryManagedIdentity,
-
-                Encrypt = true,
-
-                TrustServerCertificate = false,
-
+                DataSource = _server,
+                InitialCatalog = database,
+                UserID = _userId,
+                Password = _password,
                 ConnectTimeout = 30
             };
 

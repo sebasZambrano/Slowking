@@ -159,8 +159,11 @@ public sealed class ProcessHospitalizationAudit
         {
             _logger.LogError(
                 ex,
-                "[{Database}] Error processing hospitalization audit.",
-                database);
+                "[{Database}] Error processing hospitalization audit. " +
+                "ExceptionType={ExceptionType}, Message={ExceptionMessage}",
+                database,
+                ex.GetType().FullName,
+                ex.Message);
         }
     }
 
