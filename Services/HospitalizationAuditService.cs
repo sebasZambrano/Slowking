@@ -92,9 +92,9 @@ public sealed class HospitalizationAuditService
                         inserted.CreatedAt,
                         inserted.StartExecution,
                         inserted.EndExecution,
-                        inserted.Rule,
+                        inserted.[Rule],
                         inserted.RuleDescription,
-                        inserted.Action,
+                        inserted.[Action],
                         inserted.IPCODPACI,
                         inserted.NUMINGRES,
                         inserted.CODICAMAS,
@@ -182,111 +182,113 @@ public sealed class HospitalizationAuditService
                         cancellationToken);
                 }
 
-                await using var reader =
+                await using (var reader =
                     await command.ExecuteReaderAsync(
-                        cancellationToken);
-
-                while (await reader.ReadAsync(
-                           cancellationToken))
+                        cancellationToken))
                 {
-                    events.Add(
-                        new HospitalizationAuditEvent
-                        {
-                            AuditId =
-                                reader.GetInt64(
-                                    reader.GetOrdinal("Id")),
+                    while (await reader.ReadAsync(
+                            cancellationToken))
+                    {
+                        events.Add(
+                            new HospitalizationAuditEvent
+                            {
+                                AuditId =
+                                    reader.GetInt64(
+                                        reader.GetOrdinal("Id")),
 
-                            Container =
-                                GetNullableString(
-                                    reader,
-                                    "Container"),
+                                Container =
+                                    GetNullableString(
+                                        reader,
+                                        "Container"),
 
-                            CreatedAt =
-                                reader.GetDateTime(
-                                    reader.GetOrdinal("CreatedAt")),
+                                CreatedAt =
+                                    reader.GetDateTime(
+                                        reader.GetOrdinal("CreatedAt")),
 
-                            StartExecution =
-                                GetNullableDateTime(
-                                    reader,
-                                    "StartExecution"),
+                                StartExecution =
+                                    GetNullableDateTime(
+                                        reader,
+                                        "StartExecution"),
 
-                            EndExecution =
-                                GetNullableDateTime(
-                                    reader,
-                                    "EndExecution"),
+                                EndExecution =
+                                    GetNullableDateTime(
+                                        reader,
+                                        "EndExecution"),
 
-                            Rule =
-                                GetNullableInt32(
-                                    reader,
-                                    "Rule"),
+                                Rule =
+                                    GetNullableInt32(
+                                        reader,
+                                        "Rule"),
 
-                            RuleDescription =
-                                GetNullableString(
-                                    reader,
-                                    "RuleDescription"),
+                                RuleDescription =
+                                    GetNullableString(
+                                        reader,
+                                        "RuleDescription"),
 
-                            Action =
-                                GetNullableString(
-                                    reader,
-                                    "Action"),
+                                Action =
+                                    GetNullableString(
+                                        reader,
+                                        "Action"),
 
-                            IdentificationNumber =
-                                GetNullableString(
-                                    reader,
-                                    "IPCODPACI"),
+                                IdentificationNumber =
+                                    GetNullableString(
+                                        reader,
+                                        "IPCODPACI"),
 
-                            AdmissionNumber =
-                                GetNullableString(
-                                    reader,
-                                    "NUMINGRES"),
+                                AdmissionNumber =
+                                    GetNullableString(
+                                        reader,
+                                        "NUMINGRES"),
 
-                            Bed =
-                                GetNullableInt32(
-                                    reader,
-                                    "CODICAMAS"),
+                                Bed =
+                                    GetNullableInt32(
+                                        reader,
+                                        "CODICAMAS"),
 
-                            PreviousBed =
-                                GetNullableInt32(
-                                    reader,
-                                    "CODICAMAS_PREVIOUSLY"),
+                                PreviousBed =
+                                    GetNullableInt32(
+                                        reader,
+                                        "CODICAMAS_PREVIOUSLY"),
 
-                            NewBed =
-                                GetNullableInt32(
-                                    reader,
-                                    "CODICAMAS_AFTER"),
+                                NewBed =
+                                    GetNullableInt32(
+                                        reader,
+                                        "CODICAMAS_AFTER"),
 
-                            OriginBed =
-                                GetNullableInt32(
-                                    reader,
-                                    "CODICAORI"),
+                                OriginBed =
+                                    GetNullableInt32(
+                                        reader,
+                                        "CODICAORI"),
 
-                            DestinationBed =
-                                GetNullableInt32(
-                                    reader,
-                                    "CODICADES"),
+                                DestinationBed =
+                                    GetNullableInt32(
+                                        reader,
+                                        "CODICADES"),
 
-                            TransferConsecutive =
-                                GetNullableInt32(
-                                    reader,
-                                    "CODCONCEC"),
+                                TransferConsecutive =
+                                    GetNullableInt32(
+                                        reader,
+                                        "CODCONCEC"),
 
-                            PreviousValue =
-                                GetNullableString(
-                                    reader,
-                                    "PreviousValue"),
+                                PreviousValue =
+                                    GetNullableString(
+                                        reader,
+                                        "PreviousValue"),
 
-                            NewValue =
-                                GetNullableString(
-                                    reader,
-                                    "NewValue"),
+                                NewValue =
+                                    GetNullableString(
+                                        reader,
+                                        "NewValue"),
 
-                            Detail =
-                                GetNullableString(
-                                    reader,
-                                    "Detail")
-                        });
+                                Detail =
+                                    GetNullableString(
+                                        reader,
+                                        "Detail")
+                            });
+                    }
                 }
 
+                // The DataReader must be completely disposed before committing.
                 await transaction.CommitAsync(
                     cancellationToken);
 
