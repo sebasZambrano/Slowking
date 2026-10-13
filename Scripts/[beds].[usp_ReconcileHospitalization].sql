@@ -288,8 +288,8 @@ Johan Sebastian Zambrano Polanco - Senior Tech Service Engineer
 CREATE OR ALTER PROCEDURE [beds].[usp_ReconcileHospitalization]
 (
     @SoloSimular BIT = 1,
-    @DateAt DATE = '20260101'
-
+    @WildcardStartDate DATE = '19000101',
+    @WildcardEndDate DATE = '19000102'
 )
 AS
 BEGIN
@@ -319,17 +319,6 @@ BEGIN
     BEGIN
         RAISERROR(
             '@SoloSimular solamente puede ser 0 o 1.',
-            16,
-            1
-        );
-
-        RETURN;
-    END;
-
-    IF @DateAt IS NULL
-    BEGIN
-        RAISERROR(
-            '@DateAt no puede ser NULL.',
             16,
             1
         );
@@ -619,17 +608,8 @@ BEGIN
         INNER JOIN dbo.CHCAMASHO C
             ON C.CODICAMAS = E.CODICAMAS
         WHERE
-            E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
-             AND E.FECINIEST >= @DateAt
-            AND C.ESTADCAMA = 1
-            AND
-            (
-                SELECT COUNT(1)
-                FROM dbo.CHREGESTA E2
-                WHERE E2.CODICAMAS = E.CODICAMAS
-                AND E2.FECFINEST >= '1900-01-01 00:00:00.000' AND E2.FECFINEST <= '1900-01-01 23:59:59.000'
-                 AND E2.FECINIEST >= @DateAt
-            ) = 1;
+            E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
+            AND C.ESTADCAMA = 1;
 
 
         UPDATE C
@@ -705,8 +685,7 @@ BEGIN
         FROM dbo.CHCAMASHO C
         INNER JOIN dbo.CHREGESTA E
             ON E.CODICAMAS = C.CODICAMAS
-        WHERE E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
-          AND E.FECINIEST >= @DateAt
+        WHERE E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
           AND E.REGESTADO = 1
           AND C.CAMTRAMED = 1
           AND NOT EXISTS
@@ -812,8 +791,7 @@ BEGIN
               FROM dbo.CHREGESTA E2
               WHERE E2.IPCODPACI = T.IPCODPACI
                 AND E2.NUMINGRES = T.NUMINGRES
-                AND E2.FECINIEST >= @DateAt
-                AND E2.FECFINEST >= '1900-01-01 00:00:00.000' AND E2.FECFINEST <= '1900-01-01 23:59:59.000'
+                AND E2.FECFINEST >= @WildcardStartDate AND E2.FECFINEST <= @WildcardEndDate
           ) = 2
 
           /* EXISTE ESTANCIA EN CAMA ORIGEN */
@@ -824,8 +802,7 @@ BEGIN
               WHERE EO.IPCODPACI = T.IPCODPACI
                 AND EO.NUMINGRES = T.NUMINGRES
                 AND EO.CODICAMAS = T.CODICAORI
-                AND EO.FECINIEST >= @DateAt
-                AND EO.FECFINEST >= '1900-01-01 00:00:00.000' AND EO.FECFINEST <= '1900-01-01 23:59:59.000'
+                AND EO.FECFINEST >= @WildcardStartDate AND EO.FECFINEST <= @WildcardEndDate
           )
 
           /* EXISTE ESTANCIA EN CAMA DESTINO */
@@ -836,8 +813,7 @@ BEGIN
               WHERE ED.IPCODPACI = T.IPCODPACI
                 AND ED.NUMINGRES = T.NUMINGRES
                 AND ED.CODICAMAS = T.CODICADES
-                AND ED.FECINIEST >= @DateAt
-                AND ED.FECFINEST >= '1900-01-01 00:00:00.000' AND ED.FECFINEST <= '1900-01-01 23:59:59.000'
+                AND ED.FECFINEST >= @WildcardStartDate AND ED.FECFINEST <= @WildcardEndDate
           )
 
           AND ISNULL(C.CAMTRAMED, 0) <> 1;
@@ -929,8 +905,7 @@ BEGIN
               FROM dbo.CHREGESTA E
               WHERE E.IPCODPACI = T.IPCODPACI
                 AND E.NUMINGRES = T.NUMINGRES
-                AND E.FECINIEST >= @DateAt
-                AND E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
+                AND E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
           ) = 1
 
           /* LA ESTANCIA ACTUAL ES LA DESTINO */
@@ -952,8 +927,7 @@ BEGIN
               WHERE E.IPCODPACI = T.IPCODPACI
                 AND E.NUMINGRES = T.NUMINGRES
                 AND E.CODICAMAS = T.CODICAORI
-                AND E.FECINIEST >= @DateAt
-                AND E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
+                AND E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
           );
 
 
@@ -1037,8 +1011,7 @@ BEGIN
         INNER JOIN dbo.CHREGESTA E
             ON E.CODICAMAS = C.CODICAMAS
         WHERE 
-          E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
-          AND E.FECINIEST >= @DateAt
+          E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
           AND E.REGESTADO = 1
           AND C.CAMDEVMED = 1
 
@@ -1162,8 +1135,7 @@ BEGIN
 
             FROM dbo.CHREGESTA E
             WHERE 
-                E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
-                AND E.FECINIEST >= @DateAt
+                E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
         ),
         DosEstancias AS
         (
@@ -1192,8 +1164,8 @@ BEGIN
 
             WHERE A1.Cantidad = 2
               AND A2.Cantidad = 2
-              AND A1.FECINIEST > A2.FECINIEST
 
+              --AND A1.FECINIEST > A2.FECINIEST
               /* No debe ser la misma cama */
               --AND A1.CODICAMAS <> A2.CODICAMAS
 
@@ -1248,8 +1220,7 @@ BEGIN
                   SELECT 1
                   FROM dbo.CHREGESTA EO
                   WHERE EO.CODICAMAS = A1.CODICAMAS
-                    AND EO.FECINIEST >= @DateAt
-                    AND EO.FECFINEST >= '1900-01-01 00:00:00.000' AND EO.FECFINEST <= '1900-01-01 23:59:59.000'
+                    AND EO.FECFINEST >= @WildcardStartDate AND EO.FECFINEST <= @WildcardEndDate
                     AND
                     (
                         EO.IPCODPACI <> A1.IPCODPACI
@@ -1532,8 +1503,7 @@ BEGIN
         FROM dbo.CHCAMASHO C
         INNER JOIN dbo.CHREGESTA E
             ON E.CODICAMAS = C.CODICAMAS
-        WHERE E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
-          AND E.FECINIEST >= @DateAt
+        WHERE E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
           AND E.REGESTADO = 1
           AND C.CAMTRAMED = 1
           AND NOT EXISTS
@@ -1749,8 +1719,7 @@ BEGIN
         INNER JOIN @TrabajoDevolutivos T
             ON T.IPCODPACI = E.IPCODPACI
            AND T.NUMINGRES = E.NUMINGRES
-        WHERE E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
-          AND E.FECINIEST >= @DateAt
+        WHERE E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
           AND E.REGESTADO = 1
           AND C.CAMDEVMED = 1
           AND NOT EXISTS
@@ -1876,8 +1845,7 @@ BEGIN
                 ON C.CODICAMAS = E.CODICAMAS
 
             WHERE
-                E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
-                AND E.FECINIEST >= @DateAt
+                E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
                 AND E.REGESTADO = 1
         )
         INSERT INTO @TrabajoEgresos
@@ -2046,8 +2014,7 @@ BEGIN
               SELECT 1
               FROM dbo.CHREGESTA AS C
               WHERE C.CODICAMAS = A.CODICAMAS
-                AND C.FECINIEST >= @DateAt
-                AND C.FECFINEST >= '1900-01-01 00:00:00.000' AND C.FECFINEST <= '1900-01-01 23:59:59.000'
+                AND C.FECFINEST >= @WildcardStartDate AND C.FECFINEST <= @WildcardEndDate
           );
 
         UPDATE C
@@ -2188,8 +2155,7 @@ BEGIN
                 ON C.CODICAMAS = E.CODICAMAS
 
             WHERE
-                E.FECINIEST >= @DateAt
-                AND E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
+                E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
         )
         INSERT INTO @TrabajoEgresos
         (
@@ -2281,7 +2247,7 @@ BEGIN
                 WHERE
                     E.CODICAMAS = C.CODICAMAS
                     AND E.REGESTADO = 1
-                    AND E.FECFINEST >= '1900-01-01 00:00:00.000' AND E.FECFINEST <= '1900-01-01 23:59:59.000'
+                    AND E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
             );
 
 
