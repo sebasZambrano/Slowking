@@ -8,32 +8,32 @@ GO
 /* ============================================================================
 PROCEDURE: beds.usp_ReconcileHospitalization
 
-DESCRIPCIÓN:
+DESCRIPCIÃ“N:
 ----------------------------------------------------------------------------
-Procedimiento almacenado encargado de ejecutar procesos automáticos de
-reconciliación sobre la información de hospitalización, estancias, camas,
+Procedimiento almacenado encargado de ejecutar procesos automÃ¡ticos de
+reconciliaciÃ³n sobre la informaciÃ³n de hospitalizaciÃ³n, estancias, camas,
 traslados de medicamentos y devolutivos.
 
-Su objetivo es identificar inconsistencias de información que puedan
+Su objetivo es identificar inconsistencias de informaciÃ³n que puedan
 generar bloqueos operativos en el aplicativo y realizar, cuando las
 condiciones lo permiten, las correcciones correspondientes de forma
 controlada y trazable.
 
-El procedimiento aplica un criterio conservador de reconciliación. Solo
-realiza modificaciones cuando existe suficiente información para determinar
+El procedimiento aplica un criterio conservador de reconciliaciÃ³n. Solo
+realiza modificaciones cuando existe suficiente informaciÃ³n para determinar
 de forma segura el estado esperado. Los escenarios que corresponden a un
-comportamiento operativo válido no son considerados inconsistencias y no
-generan modificaciones ni registros de auditoría.
+comportamiento operativo vÃ¡lido no son considerados inconsistencias y no
+generan modificaciones ni registros de auditorÃ­a.
 
 REGLAS IMPLEMENTADAS:
 ----------------------------------------------------------------------------
-    REGLA 1  - RECONCILIACIÓN DE CAMA CON ESTANCIA ACTIVA
+    REGLA 1  - RECONCILIACIÃ“N DE CAMA CON ESTANCIA ACTIVA
 
               Identifica camas que tienen una estancia activa
               asociada, pero cuyo estado no corresponde a
               "Asignada" (ESTADCAMA <> 2).
 
-              Cuando existe una única estancia activa asociada,
+              Cuando existe una Ãºnica estancia activa asociada,
               la cama se actualiza a estado Asignada
               (ESTADCAMA = 2).
 
@@ -47,7 +47,7 @@ REGLAS IMPLEMENTADAS:
               Se elimina la alerta estableciendo CAMTRAMED = 0.
 
 
-   REGLA 3  - ACTIVACIÓN DE ALERTA POR TRASLADO PENDIENTE
+   REGLA 3  - ACTIVACIÃ“N DE ALERTA POR TRASLADO PENDIENTE
 
               Identifica traslados de medicamentos en estado
               Enviado (ORDESTADO = '1') asociados a exactamente
@@ -56,7 +56,7 @@ REGLAS IMPLEMENTADAS:
               Cuando existen las estancias correspondientes a la
               cama origen y la cama destino, se activa CAMTRAMED
               en ambas camas para indicar que existe un traslado
-              pendiente de materialización.
+              pendiente de materializaciÃ³n.
 
 
    REGLA 4  - CIERRE DE TRASLADO DE MEDICAMENTOS MATERIALIZADO
@@ -71,33 +71,33 @@ REGLAS IMPLEMENTADAS:
               (1) a Aceptado (2).
 
 
-   REGLA 5  - LIMPIEZA DE ALERTA DE DEVOLUCIÓN FINALIZADA
+   REGLA 5  - LIMPIEZA DE ALERTA DE DEVOLUCIÃ“N FINALIZADA
 
               Identifica camas con CAMDEVMED = 1 cuando no existen
               devoluciones pendientes y existe al menos una
-              devolución finalizada.
+              devoluciÃ³n finalizada.
 
-              Además, valida que los detalles de devolución no
+              AdemÃ¡s, valida que los detalles de devoluciÃ³n no
               presenten cantidades pendientes ni inconsistencias.
 
               Cuando se cumplen estas condiciones, se elimina la
               alerta estableciendo CAMDEVMED = 0.
 
 
-   REGLA 6  - DETECCIÓN DE DOBLE ESTANCIA ACTIVA
+   REGLA 6  - DETECCIÃ“N DE DOBLE ESTANCIA ACTIVA
 
               Identifica exactamente dos estancias abiertas para
               el mismo paciente e ingreso.
 
-              Determina cuál corresponde a la estancia actual y
-              cuál a la estancia anterior, tomando como referencia
+              Determina cuÃ¡l corresponde a la estancia actual y
+              cuÃ¡l a la estancia anterior, tomando como referencia
               la fecha de inicio de la estancia.
 
               Se excluyen los escenarios que corresponden a
               traslados de medicamentos pendientes o transferencias
-              de cama consideradas válidas.
+              de cama consideradas vÃ¡lidas.
 
-              Esta regla únicamente detecta y evalúa el caso.
+              Esta regla Ãºnicamente detecta y evalÃºa el caso.
               El cierre de la estancia anterior se realiza en la
               REGLA 7.
 
@@ -108,15 +108,15 @@ REGLAS IMPLEMENTADAS:
 
               La estancia anterior se cierra utilizando como
               fecha final exactamente la fecha de inicio de la
-              estancia más reciente.
+              estancia mÃ¡s reciente.
 
-              Además, la estancia anterior pasa a estado cerrado
+              AdemÃ¡s, la estancia anterior pasa a estado cerrado
               (REGESTADO = 2).
 
 
-   REGLA 8  - NORMALIZACIÓN DE LA ESTANCIA VIGENTE
+   REGLA 8  - NORMALIZACIÃ“N DE LA ESTANCIA VIGENTE
 
-              Procesa la estancia más reciente identificada en
+              Procesa la estancia mÃ¡s reciente identificada en
               un escenario de doble estancia.
 
               La estancia vigente queda normalizada como activa,
@@ -125,34 +125,34 @@ REGLAS IMPLEMENTADAS:
                   FECFINEST = 1900-01-01
                   REGESTADO = 1
 
-              De esta forma, la estancia más reciente queda como
-              la única estancia vigente del ingreso después de la
-              reconciliación.
+              De esta forma, la estancia mÃ¡s reciente queda como
+              la Ãºnica estancia vigente del ingreso despuÃ©s de la
+              reconciliaciÃ³n.
 
 
    REGLA 9  - LIMPIEZA FINAL DE ALERTA DE TRASLADO
 
-              Realiza una segunda validación de CAMTRAMED después
-              de ejecutar las reglas de reconciliación de traslados.
+              Realiza una segunda validaciÃ³n de CAMTRAMED despuÃ©s
+              de ejecutar las reglas de reconciliaciÃ³n de traslados.
 
-              Esta validación es necesaria porque la REGLA 4 puede
+              Esta validaciÃ³n es necesaria porque la REGLA 4 puede
               cambiar un traslado de Enviado a Aceptado durante la
-              misma ejecución.
+              misma ejecuciÃ³n.
 
-              Si después de las reconciliaciones ya no existe un
+              Si despuÃ©s de las reconciliaciones ya no existe un
               traslado Enviado, se elimina CAMTRAMED estableciendo
               su valor en 0.
 
 
-   REGLA 10 - RECONCILIACIÓN DE CABECERA DE DEVOLUTIVO
+   REGLA 10 - RECONCILIACIÃ“N DE CABECERA DE DEVOLUTIVO
 
               Identifica devolutivos cuya cabecera permanece en
               estado Pendiente (DEVESTADO = '1'), pero cuyos
               detalles ya no contienen cantidades pendientes
-              válidas.
+              vÃ¡lidas.
 
               Se valida que existan detalles, que no haya
-              cantidades pendientes válidas o inconsistentes y
+              cantidades pendientes vÃ¡lidas o inconsistentes y
               que los detalles se encuentren en estados finales.
 
               Cuando se cumplen las condiciones, la cabecera del
@@ -162,15 +162,15 @@ REGLAS IMPLEMENTADAS:
 
    REGLA 10.1 - LIMPIEZA DE ALERTA DE DEVOLUTIVO EN CAMA
 
-                Después de reconciliar la cabecera del devolutivo,
+                DespuÃ©s de reconciliar la cabecera del devolutivo,
                 valida nuevamente si existen cantidades pendientes
-                válidas asociadas a la cama.
+                vÃ¡lidas asociadas a la cama.
 
-                Si ya no existen pendientes válidos, se elimina
+                Si ya no existen pendientes vÃ¡lidos, se elimina
                 CAMDEVMED estableciendo su valor en 0.
 
-                Esta regla únicamente elimina la alerta cuando la
-                devolución ya fue finalizada. No activa CAMDEVMED
+                Esta regla Ãºnicamente elimina la alerta cuando la
+                devoluciÃ³n ya fue finalizada. No activa CAMDEVMED
                 para nuevos devolutivos pendientes.
 
 
@@ -194,19 +194,19 @@ REGLAS IMPLEMENTADAS:
                   ESTADCAMA = 1
 
 
-   REGLA 12 - LIBERACIÓN DE CAMA ASIGNADA SIN ESTANCIA ACTIVA
+   REGLA 12 - LIBERACIÃ“N DE CAMA ASIGNADA SIN ESTANCIA ACTIVA
 
               Identifica camas que permanecen en estado Asignada
               (ESTADCAMA = 2), pero que no tienen una estancia
               abierta asociada en CHREGESTA.
 
-              Esta situación representa una inconsistencia, ya
+              Esta situaciÃ³n representa una inconsistencia, ya
               que la cama aparece asignada en el aplicativo sin
               tener una estancia activa asociada.
 
               Para corregir la inconsistencia, la cama se libera
               y se limpian las configuraciones relacionadas con
-              su asignación:
+              su asignaciÃ³n:
 
                   ESTADCAMA    = 1
                   CAMTRAMED    = 0
@@ -215,43 +215,43 @@ REGLAS IMPLEMENTADAS:
                   TypeTransfer = NULL
 
               De esta forma, la cama queda disponible para una
-              nueva asignación y no conserva indicadores o
-              configuraciones asociadas a una asignación anterior.
+              nueva asignaciÃ³n y no conserva indicadores o
+              configuraciones asociadas a una asignaciÃ³n anterior.
 
-   REGLA 13 - CONCILIACIÓN CRONOLÓGICA DE MÚLTIPLES ESTANCIAS ACTIVAS SIN EGRESO REGISTRADO
+   REGLA 13 - CONCILIACIÃ“N CRONOLÃ“GICA DE MÃšLTIPLES ESTANCIAS ACTIVAS SIN EGRESO REGISTRADO
 
-              Identifica ingresos que presenta más de 2
+              Identifica ingresos que presenta mÃ¡s de 2
               estancias activas y NO existe egreso.
            
 
-              1. Las estancias se ordenan cronológicamente por FECINIEST.
-              2. Se cierran todas las estancias excepto la última.
+              1. Las estancias se ordenan cronolÃ³gicamente por FECINIEST.
+              2. Se cierran todas las estancias excepto la Ãºltima.
               3. Cada estancia se cierra utilizando el FECINIEST de la
                 siguiente estancia.
-              4. La última estancia permanece abierta.
+              4. La Ãºltima estancia permanece abierta.
               5. Las estancias cerradas pasan de REGESTADO = 1 a 2.
               6. Las camas asociadas a las estancias cerradas se liberan.
-              7. No se libera una cama si continúa siendo utilizada por
+              7. No se libera una cama si continÃºa siendo utilizada por
                 otra estancia activa.
 
 TRANSACCIONALIDAD:
 ----------------------------------------------------------------------------
-Las operaciones de reconciliación se ejecutan dentro de una transacción,
-permitiendo mantener la consistencia de la información durante el proceso.
+Las operaciones de reconciliaciÃ³n se ejecutan dentro de una transacciÃ³n,
+permitiendo mantener la consistencia de la informaciÃ³n durante el proceso.
 
-Cuando @SoloSimular = 1, las modificaciones realizadas durante la ejecución
+Cuando @SoloSimular = 1, las modificaciones realizadas durante la ejecuciÃ³n
 son revertidas al finalizar el proceso, permitiendo validar el
 comportamiento del procedimiento sin afectar permanentemente los datos.
 
 
 CONCURRENCIA:
 ----------------------------------------------------------------------------
-Se utiliza sp_getapplock para controlar la ejecución concurrente del
-procedimiento y evitar que múltiples ejecuciones simultáneas intenten
+Se utiliza sp_getapplock para controlar la ejecuciÃ³n concurrente del
+procedimiento y evitar que mÃºltiples ejecuciones simultÃ¡neas intenten
 reconciliar los mismos registros.
 
 
-PARÁMETRO:
+PARÃMETRO:
 ----------------------------------------------------------------------------
     @SoloSimular = 1
         Ejecuta las validaciones y simula las correcciones sin conservar
@@ -262,19 +262,19 @@ PARÁMETRO:
 
 ALCANCE:
 ----------------------------------------------------------------------------
-El procedimiento contempla la reconciliación de información relacionada
+El procedimiento contempla la reconciliaciÃ³n de informaciÃ³n relacionada
 con:
 
-    - Estancias de hospitalización.
+    - Estancias de hospitalizaciÃ³n.
     - Estados de camas.
     - Traslados de medicamentos.
     - Devolutivos de medicamentos.
     - Indicadores asociados a camas.
     - Escenarios de doble estancia.
-    - Casos que requieren revisión manual.
+    - Casos que requieren revisiÃ³n manual.
 
 Las reglas implementadas buscan reducir bloqueos operativos derivados de
-inconsistencias de información, manteniendo como prioridad la integridad
+inconsistencias de informaciÃ³n, manteniendo como prioridad la integridad
 y trazabilidad de los datos.
 
 
@@ -1779,12 +1779,12 @@ BEGIN
            OBJETIVO
            ----------------------------------------------------------------
            Cuando un ingreso tiene un egreso registrado en CHREGEGRE y
-           existen múltiples estancias activas en CHREGESTA:
+           existen mï¿½ltiples estancias activas en CHREGESTA:
 
-           1. Las estancias se ordenan cronológicamente por FECINIEST.
+           1. Las estancias se ordenan cronolï¿½gicamente por FECINIEST.
            2. Cada estancia se cierra con la fecha de inicio de la
               siguiente estancia.
-           3. La última estancia se cierra con FECEGRESO.
+           3. La ï¿½ltima estancia se cierra con FECEGRESO.
            4. Todas las estancias pasan de REGESTADO = 1 a REGESTADO = 2.
            5. Las camas asociadas se liberan.
 
@@ -1795,7 +1795,7 @@ BEGIN
                Estancia 3: 17:11 -> 12:47
                Estancia 4: 12:47 -> 12:47
                ...
-               Última:     12:42 -> FECEGRESO
+               ï¿½ltima:     12:42 -> FECEGRESO
 
            IMPORTANTE
            ----------------------------------------------------------------
@@ -1914,7 +1914,7 @@ BEGIN
 
 
         /* ============================================================
-           AUDITORÍA
+           AUDITORï¿½A
         ============================================================ */
 
         INSERT INTO @Auditoria
@@ -1958,17 +1958,17 @@ BEGIN
         FROM @TrabajoEgresos T;
 
       /*============================================================
-        REGLA 12 - LIBERACIÓN DE CAMA ASIGNADA SIN ESTANCIA ACTIVA
+        REGLA 12 - LIBERACIï¿½N DE CAMA ASIGNADA SIN ESTANCIA ACTIVA
         ============================================================
         Si una cama se encuentra en estado ESTADCAMA=2 (Asignada),
         pero no existe una estancia activa asociada a dicha cama
         en CHREGESTA, se considera una inconsistencia de
-        información, ya que la cama aparece asignada en el
+        informaciï¿½n, ya que la cama aparece asignada en el
         aplicativo sin tener un paciente asociado.
 
         Para corregir la inconsistencia, la cama se libera
         estableciendo ESTADCAMA=1 (Libre) y se limpian las
-        configuraciones o alertas asociadas a la asignación:
+        configuraciones o alertas asociadas a la asignaciï¿½n:
 
             CAMTRAMED   = 0
             CAMDEVMED   = 0
@@ -1976,7 +1976,7 @@ BEGIN
             TypeTransfer = NULL
 
         De esta forma, la cama queda disponible para una nueva
-        asignación y se evita que permanezca registrada como
+        asignaciï¿½n y se evita que permanezca registrada como
         ocupada o asignada sin una estancia activa asociada.
         
         ============================================================*/
@@ -2044,7 +2044,7 @@ BEGIN
         SELECT
             @FechaAuditoria,
             12,
-            'Cama asignada sin estancia activa asociada. Se libera la cama y se limpian las configuraciones de asignación.',
+            'Cama asignada sin estancia activa asociada. Se libera la cama y se limpian las configuraciones de asignaciï¿½n.',
             'UPDATE_CAMA',
             '--',
             '--',
@@ -2061,24 +2061,24 @@ BEGIN
         FROM @TrabajoCamasSinEstancia AS T;
 
         /* ============================================================
-           REGLA 13 - CONCILIACIÓN CRONOLÓGICA DE MÚLTIPLES ESTANCIAS
+           REGLA 13 - CONCILIACIï¿½N CRONOLï¿½GICA DE Mï¿½LTIPLES ESTANCIAS
            ACTIVAS SIN EGRESO REGISTRADO
            ============================================================
 
            OBJETIVO
            ----------------------------------------------------------------
-           Cuando un ingreso presenta más de 2 estancias activas
+           Cuando un ingreso presenta mï¿½s de 2 estancias activas
            (FECFINEST = 1900-01-01) y NO existe egreso
            registrado en CHREGEGRE:
 
-           1. Las estancias se ordenan cronológicamente por FECINIEST.
-           2. Se cierran todas las estancias excepto la última.
+           1. Las estancias se ordenan cronolï¿½gicamente por FECINIEST.
+           2. Se cierran todas las estancias excepto la ï¿½ltima.
            3. Cada estancia se cierra utilizando el FECINIEST de la
               siguiente estancia.
-           4. La última estancia permanece abierta.
+           4. La ï¿½ltima estancia permanece abierta.
            5. Las estancias cerradas pasan de REGESTADO = 1 a 2.
            6. Las camas asociadas a las estancias cerradas se liberan.
-           7. No se libera una cama si continúa siendo utilizada por
+           7. No se libera una cama si continï¿½a siendo utilizada por
               otra estancia activa.
 
            EJEMPLO:
@@ -2088,13 +2088,13 @@ BEGIN
                Estancia 3: 17:11 -> 12:47
                Estancia 4: 12:47 -> 12:42
                ...
-               Última:     12:42 -> 1900-01-01 (abierta)
+               ï¿½ltima:     12:42 -> 1900-01-01 (abierta)
 
            IMPORTANTE
            ----------------------------------------------------------------
            Esta regla NO consulta CHREGEGRE.
 
-           La última estancia permanece activa y abierta.
+           La ï¿½ltima estancia permanece activa y abierta.
         ============================================================ */
 
 
@@ -2111,9 +2111,9 @@ BEGIN
            Se obtiene:
            - Cantidad de estancias activas por NUMINGRES.
            - Siguiente FECINIEST mediante LEAD().
-           - Orden cronológico de cada estancia.
+           - Orden cronolï¿½gico de cada estancia.
 
-           Solo se consideran ingresos con más de 2 estancias activas.
+           Solo se consideran ingresos con mï¿½s de 2 estancias activas.
         ============================================================ */
 
         ;WITH EstanciasActivas AS
@@ -2202,7 +2202,7 @@ BEGIN
                Estancia 1 -> se cierra
                Estancia 2 -> se cierra
                ...
-               Última     -> permanece abierta
+               ï¿½ltima     -> permanece abierta
         ============================================================ */
 
         UPDATE E
@@ -2217,11 +2217,11 @@ BEGIN
         /* ============================================================
            LIBERAR CAMAS
 
-           Se liberan únicamente las camas correspondientes a las
+           Se liberan ï¿½nicamente las camas correspondientes a las
            estancias que fueron cerradas.
 
            IMPORTANTE:
-           Si una cama continúa asociada a otra estancia activa,
+           Si una cama continï¿½a asociada a otra estancia activa,
            NO debe liberarse.
         ============================================================ */
 
@@ -2252,7 +2252,7 @@ BEGIN
 
 
         /* ============================================================
-           AUDITORÍA
+           AUDITORï¿½A
         ============================================================ */
 
         INSERT INTO @Auditoria
@@ -2271,14 +2271,14 @@ BEGIN
         SELECT
             @FechaAuditoria,
             13,
-            'Conciliación cronológica de múltiples estancias activas sin egreso registrado',
+            'Conciliaciï¿½n cronolï¿½gica de mï¿½ltiples estancias activas sin egreso registrado',
             'UPDATE_ESTANCIA_CAMA',
             T.IPCODPACI,
             T.NUMINGRES,
             T.CODICAMAS,
             CONVERT(VARCHAR(23), T.FechaAnterior, 121) + ' / REGESTADO = 1 / ESTADCAMA = ' + ISNULL(T.EstadoCamaAnterior, 'NULL'),
             CONVERT(VARCHAR(23), T.FechaNueva, 121) + ' / REGESTADO = 2 / ESTADCAMA = 1',
-            'La estancia activa fue cerrada utilizando como fecha final la fecha de inicio de la siguiente estancia. Orden de estancia:' + CONVERT(VARCHAR(10), T.OrdenEstancia) + '. Se detectaron múltiples estancias activas sin egreso registrado. '
+            'La estancia activa fue cerrada utilizando como fecha final la fecha de inicio de la siguiente estancia. Orden de estancia:' + CONVERT(VARCHAR(10), T.OrdenEstancia) + '. Se detectaron mï¿½ltiples estancias activas sin egreso registrado. '
 
         FROM @TrabajoEgresos T;
 
