@@ -1,0 +1,42 @@
+﻿name: Deploy Azure Function
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-hospitalization-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish Function App
+        run: dotnet publish Slowking.csproj --configuration Release --output ./publish
+
+      - name: Exclude local settings from deployment
+        shell: bash
+        run: |
+          find ./publish -type f \( -name 'local.settings.*' -o -name 'localsetting.js' \) -delete
+
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          app-name: func-hospitalization-reconciliation-nr
+          package: ./publish
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+          sku: ${{ vars.AZURE_FUNCTIONAPP_SKU }}
