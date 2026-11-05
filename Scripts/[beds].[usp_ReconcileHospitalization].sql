@@ -438,6 +438,10 @@ BEGIN
 
         OldCama INT NOT NULL,
 
+        OldBedType INT NOT NULL,
+
+        OldTypeTransfer INT NOT NULL,
+
         OldFechaInicio DATETIME NOT NULL,
 
         OldFechaFin DATETIME NOT NULL,
@@ -447,6 +451,10 @@ BEGIN
         CurrentID INT NOT NULL,
 
         CurrentCama INT NOT NULL,
+
+        CurrentBedType INT NOT NULL,
+
+        CurrentTypeTransfer INT NOT NULL,
 
         CurrentFechaInicio DATETIME NOT NULL,
 
@@ -476,7 +484,11 @@ BEGIN
 
         RegEstadoAnterior INT NULL,
 
-        RegEstadoNuevo INT NULL
+        RegEstadoNuevo INT NULL,
+
+        BedTypeAnterior INT NULL,
+
+        TypeTransferAnterior INT NULL
     );
 
 
@@ -1116,6 +1128,8 @@ BEGIN
                 E.IPCODPACI,
                 E.NUMINGRES,
                 E.CODICAMAS,
+                C.BedType,
+                C.TypeTransfer,
                 E.FECINIEST,
                 E.FECFINEST,
                 E.REGESTADO,
@@ -1134,6 +1148,7 @@ BEGIN
                 ) AS Cantidad
 
             FROM dbo.CHREGESTA E
+            INNER JOIN dbo.CHCAMASHO AS C ON E.CODICAMAS = C.CODICAMAS
             WHERE 
                 E.FECFINEST >= @WildcardStartDate AND E.FECFINEST <= @WildcardEndDate
         ),
@@ -1145,12 +1160,16 @@ BEGIN
 
                 A2.ID AS OldID,
                 A2.CODICAMAS AS OldCama,
+                A2.BedType AS OldBedType,
+                A2.TypeTransfer AS OldTypeTransfer,
                 A2.FECINIEST AS OldFechaInicio,
                 A2.FECFINEST AS OldFechaFin,
                 A2.REGESTADO AS OldRegEstado,
 
                 A1.ID AS CurrentID,
                 A1.CODICAMAS AS CurrentCama,
+                A1.BedType AS CurrentBedType,
+                A1.TypeTransfer AS CurrentTypeTransfer,
                 A1.FECINIEST AS CurrentFechaInicio,
                 A1.FECFINEST AS CurrentFechaFin,
                 A1.REGESTADO AS CurrentRegEstado
@@ -1193,8 +1212,9 @@ BEGIN
               /*
                  VALIDACION OPERATIVA:
                  TypeTransfer=3 con una cama BedType=1 y otra BedType=2
-                 representa el escenario de medicamentos identificado
-                 en QA. Es una doble estancia esperada y NO se reconcilia.
+                 representa el escenario de medicamentos por gestionar 
+                 en la unidad funcional de la cama antigua / origen.
+                 Es una doble estancia esperada y NO se reconcilia.
               */
               AND NOT EXISTS
               (
@@ -1212,6 +1232,22 @@ BEGIN
                         (CB1.BedType = 2 AND CB2.BedType = 1)
                     )
               )
+
+              /* No debe tener medicamentos pendientes por gestionar
+                en la unidad funcional de la cama antigua / origen */
+                AND NOT EXISTS
+                (
+                    SELECT
+                        1
+                    FROM
+                        dbo.VMedicinesSupplies AS V
+                    INNER JOIN dbo.CHCAMASHO AS C ON C.CODICAMAS = A2.CODICAMAS
+                    INNER JOIN dbo.HCFISIPRO AS H ON H.NUMINGRES = A2.NUMINGRES AND H.CODPRODUC = V.Codigo AND H.UFUCODIGO = C.UFUCODIGO
+                    WHERE
+                        V.Ingreso = A2.NUMINGRES
+                        AND V.Fisico > 0
+                        AND A1.CODICAMAS <> A2.CODICAMAS
+                )
 
               /* La cama actual no puede estar ocupada por
                  otro paciente activo */
@@ -1242,11 +1278,15 @@ BEGIN
             NUMINGRES,
             OldID,
             OldCama,
+            OldBedType,
+            OldTypeTransfer,
             OldFechaInicio,
             OldFechaFin,
             OldRegEstado,
             CurrentID,
             CurrentCama,
+            CurrentBedType,
+            CurrentTypeTransfer,
             CurrentFechaInicio,
             CurrentFechaFin,
             CurrentRegEstado
@@ -1256,11 +1296,15 @@ BEGIN
             NUMINGRES,
             OldID,
             OldCama,
+            OldBedType,
+            OldTypeTransfer,
             OldFechaInicio,
             OldFechaFin,
             OldRegEstado,
             CurrentID,
             CurrentCama,
+            CurrentBedType,
+            CurrentTypeTransfer,
             CurrentFechaInicio,
             CurrentFechaFin,
             CurrentRegEstado
@@ -1291,12 +1335,20 @@ BEGIN
             + CONVERT(VARCHAR(20), D.OldID)
             + ', cama='
             + CONVERT(VARCHAR(20), D.OldCama)
+            + ', BedType='
+            + CONVERT(VARCHAR(20), D.OldBedType)
+            + ', TypeTransfer='
+            + CONVERT(VARCHAR(20), D.OldTypeTransfer)
             + ', inicio='
             + CONVERT(VARCHAR(23), D.OldFechaInicio, 121)
             + '. Estancia actual ID='
             + CONVERT(VARCHAR(20), D.CurrentID)
             + ', cama='
             + CONVERT(VARCHAR(20), D.CurrentCama)
+            + ', BedType='
+            + CONVERT(VARCHAR(20), D.CurrentBedType)
+            + ', TypeTransfer='
+            + CONVERT(VARCHAR(20), D.CurrentTypeTransfer)
             + ', inicio='
             + CONVERT(VARCHAR(23), D.CurrentFechaInicio, 121)
         FROM @DobleEstancia D;
@@ -1331,7 +1383,9 @@ BEGIN
             FechaAnterior,
             FechaNueva,
             RegEstadoAnterior,
-            RegEstadoNuevo
+            RegEstadoNuevo,
+            BedTypeAnterior,
+            TypeTransferAnterior
         )
         SELECT
             D.OldID,
@@ -1345,7 +1399,9 @@ BEGIN
                 WHEN D.OldRegEstado IN (1,2)
                     THEN 2
                 ELSE D.OldRegEstado
-            END
+            END,
+            D.OldBedType,
+            D.OldTypeTransfer
         FROM @DobleEstancia D;
 
 
@@ -1356,6 +1412,14 @@ BEGIN
         FROM dbo.CHREGESTA E
         INNER JOIN @TrabajoEstancias T
             ON T.ID = E.ID;
+
+        UPDATE C
+        SET
+            C.BedType = NULL,
+            C.TypeTransfer = NULL
+        FROM dbo.CHCAMASHO C
+        INNER JOIN @DobleEstancia D
+            ON D.OldCama = C.CODICAMAS;
 
 
         INSERT INTO @Auditoria
@@ -1381,10 +1445,15 @@ BEGIN
             T.CODICAMAS,
             CONVERT(VARCHAR(23), T.FechaAnterior, 121)
             + ' / REGESTADO='
-            + CONVERT(VARCHAR(10), T.RegEstadoAnterior),
+            + CONVERT(VARCHAR(10), T.RegEstadoAnterior)
+            + ' / BedType='
+            + CONVERT(VARCHAR(10), T.BedTypeAnterior)
+            + ' / TypeTransfer='
+            + CONVERT(VARCHAR(10), T.TypeTransferAnterior),
             CONVERT(VARCHAR(23), T.FechaNueva, 121)
             + ' / REGESTADO='
-            + CONVERT(VARCHAR(10), T.RegEstadoNuevo),
+            + CONVERT(VARCHAR(10), T.RegEstadoNuevo)
+            + ' / BedType=NULL / TypeTransfer=NULL,',
             'La fecha final de la estancia anterior pasa a ser exactamente la fecha inicial de la estancia siguiente.'
         FROM @TrabajoEstancias T;
 
@@ -1411,7 +1480,9 @@ BEGIN
             FechaAnterior,
             FechaNueva,
             RegEstadoAnterior,
-            RegEstadoNuevo
+            RegEstadoNuevo,
+            BedTypeAnterior,
+            TypeTransferAnterior
         )
         SELECT
             E.ID,
@@ -1421,7 +1492,9 @@ BEGIN
             E.FECFINEST,
             CONVERT(DATETIME, '19000101', 112),
             E.REGESTADO,
-            1
+            1,
+            D.CurrentBedType,
+            D.CurrentTypeTransfer
         FROM dbo.CHREGESTA E
         INNER JOIN @DobleEstancia D
             ON D.CurrentID = E.ID
@@ -1438,6 +1511,14 @@ BEGIN
         FROM dbo.CHREGESTA E
         INNER JOIN @TrabajoEstancias T
             ON T.ID = E.ID;
+
+        UPDATE C
+        SET
+            C.BedType = NULL,
+            C.TypeTransfer = NULL
+        FROM dbo.CHCAMASHO C
+        INNER JOIN @DobleEstancia D
+            ON D.CurrentCama = C.CODICAMAS;
 
 
         INSERT INTO @Auditoria
@@ -1464,8 +1545,12 @@ BEGIN
             'FECFINEST='
             + CONVERT(VARCHAR(23), T.FechaAnterior, 121)
             + ' / REGESTADO='
-            + CONVERT(VARCHAR(10), T.RegEstadoAnterior),
-            'FECFINEST=1900-01-01 / REGESTADO=1',
+            + CONVERT(VARCHAR(10), T.RegEstadoAnterior)
+            + ' / BedType='
+            + CONVERT(VARCHAR(10), T.BedTypeAnterior)
+            + ' / TypeTransfer='
+            + CONVERT(VARCHAR(10), T.TypeTransferAnterior),
+            'FECFINEST=1900-01-01 / REGESTADO=1 BedType=NULL / TypeTransfer=NULL',
             'La estancia mas reciente queda como estancia activa.'
         FROM @TrabajoEstancias T;
 
