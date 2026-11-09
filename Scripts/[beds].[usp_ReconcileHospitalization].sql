@@ -392,7 +392,11 @@ BEGIN
 
         CAMDEVMED_Anterior BIT NULL,
 
-        CAMDEVMED_Nuevo BIT NULL
+        CAMDEVMED_Nuevo BIT NULL,
+
+        BedType INT NULL,
+
+        TypeTransfer INT NULL
     );
 
 
@@ -608,14 +612,18 @@ BEGIN
             NUMINGRES,
             CODICAMAS,
             EstadoAnterior,
-            EstadoNuevo
+            EstadoNuevo,
+            BedType,
+            TypeTransfer
         )
         SELECT
             E.IPCODPACI,
             E.NUMINGRES,
             E.CODICAMAS,
             C.ESTADCAMA,
-            2
+            2,
+            C.BedType,
+            C.TypeTransfer
         FROM dbo.CHREGESTA E
         INNER JOIN dbo.CHCAMASHO C
             ON C.CODICAMAS = E.CODICAMAS
@@ -686,14 +694,18 @@ BEGIN
             NUMINGRES,
             CODICAMAS,
             CAMTRAMED_Anterior,
-            CAMTRAMED_Nuevo
+            CAMTRAMED_Nuevo,
+            BedType,
+            TypeTransfer
         )
         SELECT DISTINCT
             E.IPCODPACI,
             E.NUMINGRES,
             C.CODICAMAS,
             C.CAMTRAMED,
-            NULL
+            NULL,
+            C.BedType,
+            C.TypeTransfer
         FROM dbo.CHCAMASHO C
         INNER JOIN dbo.CHREGESTA E
             ON E.CODICAMAS = C.CODICAMAS
@@ -775,14 +787,18 @@ BEGIN
             NUMINGRES,
             CODICAMAS,
             CAMTRAMED_Anterior,
-            CAMTRAMED_Nuevo
+            CAMTRAMED_Nuevo,
+            BedType,
+            TypeTransfer
         )
         SELECT DISTINCT
             E.IPCODPACI,
             E.NUMINGRES,
             C.CODICAMAS,
             C.CAMTRAMED,
-            1
+            1,
+            C.BedType,
+            C.TypeTransfer
         FROM dbo.CHTRAMEDC T
         INNER JOIN dbo.CHREGESTA E
             ON E.IPCODPACI = T.IPCODPACI
@@ -1011,14 +1027,18 @@ BEGIN
             NUMINGRES,
             CODICAMAS,
             CAMDEVMED_Anterior,
-            CAMDEVMED_Nuevo
+            CAMDEVMED_Nuevo,
+            BedType,
+            TypeTransfer
         )
         SELECT DISTINCT
             E.IPCODPACI,
             E.NUMINGRES,
             C.CODICAMAS,
             C.CAMDEVMED,
-            0
+            0,
+            C.BedType,
+            C.TypeTransfer
         FROM dbo.CHCAMASHO C
         INNER JOIN dbo.CHREGESTA E
             ON E.CODICAMAS = C.CODICAMAS
@@ -1062,15 +1082,18 @@ BEGIN
                 AND
                 (
                     DD.PROESTADO IS NULL
-                    OR DD.PROESTADO <> D.DEVESTADO
                     OR DD.CANPENDIE IS NULL
-                    OR DD.CANPENDIE <> 0
+                    --OR DD.PROESTADO <> D.DEVESTADO
+                    --OR DD.CANPENDIE <> 0
                 )
           );
 
 
         UPDATE C
-        SET C.CAMDEVMED = 0
+        SET
+            C.CAMDEVMED = 0,
+            C.BedType = NULL, 
+            C.TypeTransfer = NULL
         FROM dbo.CHCAMASHO C
         INNER JOIN @TrabajoCamas T
             ON T.CODICAMAS = C.CODICAMAS;
@@ -1097,8 +1120,8 @@ BEGIN
             T.IPCODPACI,
             T.NUMINGRES,
             T.CODICAMAS,
-            'CAMDEVMED=1',
-            'CAMDEVMED=0',
+            'CAMDEVMED=1, BedType = ' + CONVERT(VARCHAR(10), T.BedType) + ', TypeTransfer = ' + CONVERT(VARCHAR(10), T.TypeTransfer),
+            'CAMDEVMED=0, BedType = NULL, TypeTransfer = NULL',
             'Las devoluciones no pendientes tienen detalle consistente y CANPENDIE=0.'
         FROM @TrabajoCamas T;
 
@@ -1577,14 +1600,18 @@ BEGIN
             NUMINGRES,
             CODICAMAS,
             CAMTRAMED_Anterior,
-            CAMTRAMED_Nuevo
+            CAMTRAMED_Nuevo,
+            BedType,
+            TypeTransfer
         )
         SELECT DISTINCT
             E.IPCODPACI,
             E.NUMINGRES,
             C.CODICAMAS,
             C.CAMTRAMED,
-            NULL
+            NULL,
+            C.BedType,
+            C.TypeTransfer
         FROM dbo.CHCAMASHO C
         INNER JOIN dbo.CHREGESTA E
             ON E.CODICAMAS = C.CODICAMAS
@@ -1790,14 +1817,18 @@ BEGIN
             NUMINGRES,
             CODICAMAS,
             CAMDEVMED_Anterior,
-            CAMDEVMED_Nuevo
+            CAMDEVMED_Nuevo,
+            BedType,
+            TypeTransfer
         )
         SELECT DISTINCT
             E.IPCODPACI,
             E.NUMINGRES,
             C.CODICAMAS,
             C.CAMDEVMED,
-            0
+            0,
+            C.BedType,
+            C.TypeTransfer
         FROM dbo.CHREGESTA E
         INNER JOIN dbo.CHCAMASHO C
             ON C.CODICAMAS = E.CODICAMAS
