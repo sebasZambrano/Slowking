@@ -442,9 +442,9 @@ BEGIN
 
         OldCama INT NOT NULL,
 
-        OldBedType INT NOT NULL,
+        OldBedType INT NULL,
 
-        OldTypeTransfer INT NOT NULL,
+        OldTypeTransfer INT NULL,
 
         OldFechaInicio DATETIME NOT NULL,
 
@@ -456,9 +456,9 @@ BEGIN
 
         CurrentCama INT NOT NULL,
 
-        CurrentBedType INT NOT NULL,
+        CurrentBedType INT NULL,
 
-        CurrentTypeTransfer INT NOT NULL,
+        CurrentTypeTransfer INT NULL,
 
         CurrentFechaInicio DATETIME NOT NULL,
 
